@@ -8,11 +8,18 @@ const RAKUTEN_AFFILIATE_ID = process.env.RAKUTEN_AFFILIATE_ID;
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN;
 
 const API_BASE = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
+const DAILY_THEMES = [
+  '便利グッズ', '時短 家事', 'キッチン 便利', '収納 便利', '掃除 便利グッズ',
+  'スマホ 便利グッズ', '洗濯 便利グッズ', '防寒 便利グッズ', '料理 時短', '新生活 便利グッズ'
+];
+let dailyPlanCache = null;
+let dailyPlanGeneratedAt = null;
 
 function json(res, status, body) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store'
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*'
   });
   res.end(JSON.stringify(body));
 }
@@ -32,7 +39,6 @@ function normalizeItem(entry) {
   const imageList = item.mediumImageUrls || item.smallImageUrls || [];
   const firstImage = imageList[0];
   const imageUrl = typeof firstImage === 'string' ? firstImage : firstImage?.imageUrl || null;
-
   return {
     itemName: item.itemName || null,
     itemPrice: Number(item.itemPrice || 0) || null,
@@ -54,7 +60,6 @@ function normalizeItem(entry) {
 function scoreItem(item) {
   let score = 0;
   const reasons = [];
-
   if (item.reviewAverage >= 4.5) { score += 28; reasons.push('高評価4.5+'); }
   else if (item.reviewAverage >= 4.2) { score += 22; reasons.push('高評価4.2+'); }
   else if (item.reviewAverage >= 4.0) { score += 16; reasons.push('評価4.0+'); }
@@ -72,7 +77,6 @@ function scoreItem(item) {
   if (item.postageFlag === 0 || item.postageFlag === '0') { score += 12; reasons.push('送料無料'); }
   if (item.pointRate >= 5) { score += 7; reasons.push('ポイント倍率高め'); }
   if (item.affiliateUrl) { score += 5; reasons.push('アフィリエイトURL取得済み'); }
-
   return { score: Math.min(score, 100), reasons };
 }
 
@@ -87,31 +91,58 @@ async function searchRakuten({ keyword, hits = 10, sort = '-reviewCount', minPri
     sort,
     availability: '1'
   });
-
   if (minPrice) params.set('minPrice', String(minPrice));
   if (maxPrice) params.set('maxPrice', String(maxPrice));
   if (genreId) params.set('genreId', String(genreId));
 
   const upstream = await fetch(`${API_BASE}?${params.toString()}`);
   const data = await upstream.json().catch(() => ({}));
-
   if (!upstream.ok) {
     const error = new Error(`Rakuten API error ${upstream.status}`);
     error.status = upstream.status;
     error.details = data;
     throw error;
   }
-
   const rawItems = data.Items || data.items || [];
-  return {
-    meta: {
-      page: data.page,
-      pageCount: data.pageCount,
-      hits: data.hits,
-      count: data.count
-    },
-    items: rawItems.map(normalizeItem)
+  return { meta: { page: data.page, pageCount: data.pageCount, hits: data.hits, count: data.count }, items: rawItems.map(normalizeItem) };
+}
+
+async function buildDailyPlan() {
+  const all = [];
+  const errors = [];
+  for (const theme of DAILY_THEMES) {
+    try {
+      const result = await searchRakuten({ keyword: theme, hits: 20, sort: '-reviewCount' });
+      for (const item of result.items) all.push({ theme, ...item, ...scoreItem(item) });
+    } catch (error) {
+      errors.push({ theme, status: error?.status || null, message: String(error?.message || error) });
+    }
+  }
+
+  const seen = new Set();
+  const candidates = all
+    .sort((a, b) => b.score - a.score || b.reviewCount - a.reviewCount)
+    .filter((item) => {
+      const key = item.itemCode || item.itemUrl;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 20)
+    .map((item, i) => ({ rank: i + 1, ...item }));
+
+  dailyPlanGeneratedAt = new Date().toISOString();
+  dailyPlanCache = {
+    ok: candidates.length > 0,
+    generatedAt: dailyPlanGeneratedAt,
+    scoringVersion: 'rakumitsu-v2',
+    themes: DAILY_THEMES,
+    candidateCount: candidates.length,
+    candidates,
+    errors
   };
+  console.log('[DAILY_PLAN]', JSON.stringify({ generatedAt: dailyPlanGeneratedAt, candidateCount: candidates.length, top5: candidates.slice(0, 5).map(x => ({ rank: x.rank, theme: x.theme, score: x.score, itemName: x.itemName, reviewCount: x.reviewCount, reviewAverage: x.reviewAverage, itemPrice: x.itemPrice })) }));
+  return dailyPlanCache;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -119,18 +150,15 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === '/health') {
-      return json(res, 200, {
-        ok: true,
-        service: 'cashflowengine-rakuten-bridge',
-        configured: configured(),
-        apiVersion: '20260701'
-      });
+      return json(res, 200, { ok: true, service: 'cashflowengine-rakuten-bridge', configured: configured(), apiVersion: '20260701', dailyPlanGeneratedAt });
     }
 
-    if (!['/search', '/recommend'].includes(url.pathname)) {
-      return json(res, 404, { error: 'not_found' });
+    if (url.pathname === '/daily-plan') {
+      if (!dailyPlanCache) return json(res, 503, { ok: false, error: 'daily_plan_not_ready' });
+      return json(res, 200, dailyPlanCache);
     }
 
+    if (!['/search', '/recommend'].includes(url.pathname)) return json(res, 404, { error: 'not_found' });
     if (!authOk(req)) return json(res, 401, { error: 'unauthorized' });
     if (!configured()) return json(res, 503, { error: 'rakuten_credentials_not_configured' });
 
@@ -147,36 +175,18 @@ const server = http.createServer(async (req, res) => {
     });
 
     if (url.pathname === '/recommend') {
-      const ranked = result.items
-        .map((item) => ({ ...item, ...scoreItem(item) }))
-        .sort((a, b) => b.score - a.score);
-
-      return json(res, 200, {
-        keyword,
-        count: ranked.length,
-        scoringVersion: 'rakumitsu-v1',
-        items: ranked
-      });
+      const ranked = result.items.map((item) => ({ ...item, ...scoreItem(item) })).sort((a, b) => b.score - a.score);
+      return json(res, 200, { keyword, count: ranked.length, scoringVersion: 'rakumitsu-v1', items: ranked });
     }
 
-    return json(res, 200, {
-      keyword,
-      count: result.items.length,
-      ...result.meta,
-      items: result.items
-    });
+    return json(res, 200, { keyword, count: result.items.length, ...result.meta, items: result.items });
   } catch (error) {
     const status = Number(error?.status || 500);
-    return json(res, status, {
-      error: status === 500 ? 'internal_error' : 'rakuten_api_error',
-      status,
-      message: String(error?.message || error),
-      ...(error?.details ? { details: error.details } : {})
-    });
+    return json(res, status, { error: status === 500 ? 'internal_error' : 'rakuten_api_error', status, message: String(error?.message || error), ...(error?.details ? { details: error.details } : {}) });
   }
 });
 
-async function runSelfTest() {
+async function runStartupJobs() {
   if (!configured()) {
     console.log('[SELFTEST] skipped: credentials not fully configured');
     return;
@@ -184,25 +194,20 @@ async function runSelfTest() {
   try {
     const result = await searchRakuten({ keyword: 'キッチン 便利グッズ', hits: 1, sort: '-reviewCount' });
     const first = result.items[0];
-    console.log('[SELFTEST]', JSON.stringify({
-      ok: Boolean(first),
-      itemReturned: Boolean(first),
-      hasAffiliateUrl: Boolean(first?.affiliateUrl),
-      itemName: first?.itemName || null,
-      reviewCount: first?.reviewCount || 0,
-      reviewAverage: first?.reviewAverage || 0
-    }));
+    console.log('[SELFTEST]', JSON.stringify({ ok: Boolean(first), itemReturned: Boolean(first), hasAffiliateUrl: Boolean(first?.affiliateUrl), itemName: first?.itemName || null, reviewCount: first?.reviewCount || 0, reviewAverage: first?.reviewAverage || 0 }));
   } catch (error) {
-    console.error('[SELFTEST]', JSON.stringify({
-      ok: false,
-      status: error?.status || null,
-      message: String(error?.message || error),
-      details: error?.details || null
-    }));
+    console.error('[SELFTEST]', JSON.stringify({ ok: false, status: error?.status || null, message: String(error?.message || error), details: error?.details || null }));
+  }
+
+  try {
+    await buildDailyPlan();
+  } catch (error) {
+    console.error('[DAILY_PLAN_ERROR]', String(error?.message || error));
   }
 }
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Rakuten bridge listening on ${PORT}`);
-  setTimeout(runSelfTest, 1500);
+  setTimeout(runStartupJobs, 1500);
+  setInterval(() => buildDailyPlan().catch(e => console.error('[DAILY_PLAN_ERROR]', String(e?.message || e))), 6 * 60 * 60 * 1000);
 });
