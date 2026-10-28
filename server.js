@@ -7,7 +7,7 @@ const RAKUTEN_ACCESS_KEY = process.env.RAKUTEN_ACCESS_KEY;
 const RAKUTEN_AFFILIATE_ID = process.env.RAKUTEN_AFFILIATE_ID;
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN;
 
-const API_BASE = 'https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601';
+const API_BASE = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 
 function json(res, status, body) {
   res.writeHead(status, {
