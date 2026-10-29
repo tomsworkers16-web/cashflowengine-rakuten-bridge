@@ -2,10 +2,15 @@ import http from 'node:http';
 import { URL } from 'node:url';
 
 const PORT = process.env.PORT || 10000;
+
 const RAKUTEN_APPLICATION_ID = process.env.RAKUTEN_APPLICATION_ID;
 const RAKUTEN_ACCESS_KEY = process.env.RAKUTEN_ACCESS_KEY;
 const RAKUTEN_AFFILIATE_ID = process.env.RAKUTEN_AFFILIATE_ID;
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN;
+
+const THREADS_API_BASE = process.env.THREADS_API_BASE || 'https://graph.threads.net/v1.0';
+const THREADS_ACCESS_TOKEN = process.env.THREADS_ACCESS_TOKEN;
+const THREADS_USER_ID = process.env.THREADS_USER_ID;
 
 const API_BASE = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 const DAILY_THEMES = [
@@ -32,6 +37,94 @@ function authOk(req) {
 
 function configured() {
   return Boolean(RAKUTEN_APPLICATION_ID && RAKUTEN_ACCESS_KEY && RAKUTEN_AFFILIATE_ID && BRIDGE_TOKEN);
+}
+
+function threadsConfigured() {
+  return Boolean(THREADS_ACCESS_TOKEN && THREADS_USER_ID && BRIDGE_TOKEN);
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  if (!chunks.length) return {};
+  const raw = Buffer.concat(chunks).toString('utf8');
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const error = new Error('invalid_json');
+    error.status = 400;
+    throw error;
+  }
+}
+
+async function threadsRequest(path, { method = 'GET', params = {} } = {}) {
+  if (!THREADS_ACCESS_TOKEN) {
+    const error = new Error('threads_access_token_not_configured');
+    error.status = 503;
+    throw error;
+  }
+
+  const url = new URL(`${THREADS_API_BASE}${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') url.searchParams.set(key, String(value));
+  }
+  url.searchParams.set('access_token', THREADS_ACCESS_TOKEN);
+
+  const upstream = await fetch(url, { method });
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) {
+    const error = new Error(`Threads API error ${upstream.status}`);
+    error.status = upstream.status;
+    error.details = data;
+    throw error;
+  }
+  return data;
+}
+
+async function threadsSelftest() {
+  if (!threadsConfigured()) return { ok: false, configured: false };
+  try {
+    const me = await threadsRequest('/me', {
+      params: { fields: 'id,username,name,threads_profile_picture_url,threads_biography' }
+    });
+    return { ok: true, configured: true, userId: me?.id || THREADS_USER_ID, username: me?.username || null };
+  } catch (error) {
+    return {
+      ok: false,
+      configured: true,
+      status: error?.status || 500,
+      message: String(error?.message || error),
+      details: error?.details || null
+    };
+  }
+}
+
+async function publishThreadsText(text, replyToId = null) {
+  if (!text || typeof text !== 'string') {
+    const error = new Error('text_required');
+    error.status = 400;
+    throw error;
+  }
+  if (text.length > 500) {
+    const error = new Error('text_too_long');
+    error.status = 400;
+    throw error;
+  }
+
+  const params = {
+    media_type: 'TEXT',
+    text,
+    auto_publish_text: 'true'
+  };
+  if (replyToId) params.reply_to_id = replyToId;
+
+  const result = await threadsRequest('/me/threads', { method: 'POST', params });
+  return {
+    ok: true,
+    id: result?.id || null,
+    replyToId: replyToId || null
+  };
 }
 
 function normalizeItem(entry) {
@@ -150,12 +243,84 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (url.pathname === '/health') {
-      return json(res, 200, { ok: true, service: 'cashflowengine-rakuten-bridge', configured: configured(), apiVersion: '20260701', dailyPlanGeneratedAt });
+      return json(res, 200, {
+        ok: true,
+        service: 'cashflowengine-rakuten-bridge',
+        configured: configured(),
+        apiVersion: '20260701',
+        dailyPlanGeneratedAt,
+        threads: { configured: threadsConfigured(), apiBase: THREADS_API_BASE }
+      });
     }
 
     if (url.pathname === '/daily-plan') {
       if (!dailyPlanCache) return json(res, 503, { ok: false, error: 'daily_plan_not_ready' });
       return json(res, 200, dailyPlanCache);
+    }
+
+    if (url.pathname === '/threads/health') {
+      const result = await threadsSelftest();
+      return json(res, result.ok ? 200 : (result.configured ? 502 : 503), result);
+    }
+
+    if (url.pathname.startsWith('/threads/')) {
+      if (!authOk(req)) return json(res, 401, { error: 'unauthorized' });
+      if (!threadsConfigured()) return json(res, 503, { error: 'threads_credentials_not_configured' });
+
+      if (url.pathname === '/threads/me' && req.method === 'GET') {
+        const result = await threadsRequest('/me', {
+          params: { fields: url.searchParams.get('fields') || 'id,username,name,threads_profile_picture_url,threads_biography' }
+        });
+        return json(res, 200, result);
+      }
+
+      if (url.pathname === '/threads/replies' && req.method === 'GET') {
+        const threadId = url.searchParams.get('thread_id');
+        if (!threadId) return json(res, 400, { error: 'thread_id_required' });
+        const result = await threadsRequest(`/${encodeURIComponent(threadId)}/replies`, {
+          params: {
+            fields: url.searchParams.get('fields') || 'id,text,timestamp,username,permalink',
+            reverse: url.searchParams.get('reverse') || 'false'
+          }
+        });
+        return json(res, 200, result);
+      }
+
+      if (url.pathname === '/threads/conversation' && req.method === 'GET') {
+        const threadId = url.searchParams.get('thread_id');
+        if (!threadId) return json(res, 400, { error: 'thread_id_required' });
+        const result = await threadsRequest(`/${encodeURIComponent(threadId)}/conversation`, {
+          params: {
+            fields: url.searchParams.get('fields') || 'id,text,timestamp,username,permalink',
+            reverse: url.searchParams.get('reverse') || 'false'
+          }
+        });
+        return json(res, 200, result);
+      }
+
+      if (url.pathname === '/threads/insights' && req.method === 'GET') {
+        const threadId = url.searchParams.get('thread_id');
+        if (!threadId) return json(res, 400, { error: 'thread_id_required' });
+        const result = await threadsRequest(`/${encodeURIComponent(threadId)}/insights`, {
+          params: { metric: url.searchParams.get('metric') || 'views,likes,replies,reposts,quotes,shares' }
+        });
+        return json(res, 200, result);
+      }
+
+      if (url.pathname === '/threads/post' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = await publishThreadsText(body.text);
+        return json(res, 200, result);
+      }
+
+      if (url.pathname === '/threads/reply' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        if (!body.replyToId) return json(res, 400, { error: 'replyToId_required' });
+        const result = await publishThreadsText(body.text, body.replyToId);
+        return json(res, 200, result);
+      }
+
+      return json(res, 404, { error: 'threads_route_not_found' });
     }
 
     if (!['/search', '/recommend'].includes(url.pathname)) return json(res, 404, { error: 'not_found' });
@@ -182,32 +347,40 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { keyword, count: result.items.length, ...result.meta, items: result.items });
   } catch (error) {
     const status = Number(error?.status || 500);
-    return json(res, status, { error: status === 500 ? 'internal_error' : 'rakuten_api_error', status, message: String(error?.message || error), ...(error?.details ? { details: error.details } : {}) });
+    return json(res, status, {
+      error: status === 500 ? 'internal_error' : (String(error?.message || '').startsWith('Threads API') ? 'threads_api_error' : 'upstream_error'),
+      status,
+      message: String(error?.message || error),
+      ...(error?.details ? { details: error.details } : {})
+    });
   }
 });
 
 async function runStartupJobs() {
   if (!configured()) {
-    console.log('[SELFTEST] skipped: credentials not fully configured');
-    return;
-  }
-  try {
-    const result = await searchRakuten({ keyword: 'キッチン 便利グッズ', hits: 1, sort: '-reviewCount' });
-    const first = result.items[0];
-    console.log('[SELFTEST]', JSON.stringify({ ok: Boolean(first), itemReturned: Boolean(first), hasAffiliateUrl: Boolean(first?.affiliateUrl), itemName: first?.itemName || null, reviewCount: first?.reviewCount || 0, reviewAverage: first?.reviewAverage || 0 }));
-  } catch (error) {
-    console.error('[SELFTEST]', JSON.stringify({ ok: false, status: error?.status || null, message: String(error?.message || error), details: error?.details || null }));
+    console.log('[SELFTEST] skipped: Rakuten credentials not fully configured');
+  } else {
+    try {
+      const result = await searchRakuten({ keyword: 'キッチン 便利グッズ', hits: 1, sort: '-reviewCount' });
+      const first = result.items[0];
+      console.log('[SELFTEST]', JSON.stringify({ ok: Boolean(first), itemReturned: Boolean(first), hasAffiliateUrl: Boolean(first?.affiliateUrl), itemName: first?.itemName || null, reviewCount: first?.reviewCount || 0, reviewAverage: first?.reviewAverage || 0 }));
+    } catch (error) {
+      console.error('[SELFTEST]', JSON.stringify({ ok: false, status: error?.status || null, message: String(error?.message || error), details: error?.details || null }));
+    }
+
+    try {
+      await buildDailyPlan();
+    } catch (error) {
+      console.error('[DAILY_PLAN_ERROR]', String(error?.message || error));
+    }
   }
 
-  try {
-    await buildDailyPlan();
-  } catch (error) {
-    console.error('[DAILY_PLAN_ERROR]', String(error?.message || error));
-  }
+  const threadsTest = await threadsSelftest();
+  console.log('[THREADS_SELFTEST]', JSON.stringify(threadsTest));
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Rakuten bridge listening on ${PORT}`);
+  console.log(`Cash Flow Engine bridge listening on ${PORT}`);
   setTimeout(runStartupJobs, 1500);
   setInterval(() => buildDailyPlan().catch(e => console.error('[DAILY_PLAN_ERROR]', String(e?.message || e))), 6 * 60 * 60 * 1000);
 });
