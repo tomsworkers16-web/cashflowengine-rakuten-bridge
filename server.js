@@ -11,6 +11,7 @@ const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN;
 const THREADS_API_BASE = process.env.THREADS_API_BASE || 'https://graph.threads.net/v1.0';
 const THREADS_ACCESS_TOKEN = process.env.THREADS_ACCESS_TOKEN;
 const THREADS_USER_ID = process.env.THREADS_USER_ID;
+const THREADS_SMOKE_THREAD_ID = process.env.THREADS_SMOKE_THREAD_ID;
 
 const API_BASE = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 const DAILY_THEMES = [
@@ -98,6 +99,51 @@ async function threadsSelftest() {
       details: error?.details || null
     };
   }
+}
+
+async function threadsReadSmokeTest(threadId) {
+  const result = {
+    ok: false,
+    threadId,
+    replies: { ok: false },
+    conversation: { ok: false },
+    insights: { ok: false }
+  };
+
+  try {
+    const replies = await threadsRequest(`/${encodeURIComponent(threadId)}/replies`, {
+      params: { fields: 'id,text,timestamp,username,permalink', reverse: 'false' }
+    });
+    result.replies = { ok: true, count: Array.isArray(replies?.data) ? replies.data.length : 0 };
+  } catch (error) {
+    result.replies = { ok: false, status: error?.status || 500, message: String(error?.message || error), details: error?.details || null };
+  }
+
+  try {
+    const conversation = await threadsRequest(`/${encodeURIComponent(threadId)}/conversation`, {
+      params: { fields: 'id,text,timestamp,username,permalink', reverse: 'false' }
+    });
+    result.conversation = { ok: true, count: Array.isArray(conversation?.data) ? conversation.data.length : 0 };
+  } catch (error) {
+    result.conversation = { ok: false, status: error?.status || 500, message: String(error?.message || error), details: error?.details || null };
+  }
+
+  try {
+    const insights = await threadsRequest(`/${encodeURIComponent(threadId)}/insights`, {
+      params: { metric: 'views,likes,replies,reposts,quotes,shares' }
+    });
+    const rows = Array.isArray(insights?.data) ? insights.data : [];
+    result.insights = {
+      ok: true,
+      count: rows.length,
+      metrics: rows.map((x) => x?.name).filter(Boolean)
+    };
+  } catch (error) {
+    result.insights = { ok: false, status: error?.status || 500, message: String(error?.message || error), details: error?.details || null };
+  }
+
+  result.ok = Boolean(result.replies.ok && result.conversation.ok && result.insights.ok);
+  return result;
 }
 
 async function publishThreadsText(text, replyToId = null) {
@@ -377,6 +423,11 @@ async function runStartupJobs() {
 
   const threadsTest = await threadsSelftest();
   console.log('[THREADS_SELFTEST]', JSON.stringify(threadsTest));
+
+  if (threadsTest.ok && THREADS_SMOKE_THREAD_ID) {
+    const readSmoke = await threadsReadSmokeTest(THREADS_SMOKE_THREAD_ID);
+    console.log('[THREADS_READ_SMOKE]', JSON.stringify(readSmoke));
+  }
 }
 
 server.listen(PORT, '0.0.0.0', () => {
