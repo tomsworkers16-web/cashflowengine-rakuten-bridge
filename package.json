@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server-demand.js"
+    "start": "node server-profit.js"
   },
   "engines": {
     "node": ">=20"
