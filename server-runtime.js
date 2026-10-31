@@ -5,6 +5,7 @@ import { getSupabaseStatus, writeSystemEvent, syncThreadsEvaluation } from './su
 const PORT = Number(process.env.PORT || 10000);
 const AUTOMATION_TOKEN = process.env.CFE_AUTOMATION_TOKEN || '';
 const EXTERNAL_BASE = (process.env.RENDER_EXTERNAL_URL || 'https://cashflowengine-rakuten-bridge.onrender.com').replace(/\/$/, '');
+const LOCAL_TIMEOUT_MS = 20000;
 let supabaseSyncRunning = false;
 
 const originalCreateServer = http.createServer.bind(http);
@@ -57,20 +58,26 @@ http.createServer = function guardedCreateServer(listener) {
 
 await import('./server-automation-gateway.js');
 
-async function localGet(path) {
-  const res = await fetch(`http://127.0.0.1:${PORT}${path}`);
-  const data = await res.json().catch(() => ({}));
-  return { status: res.status, data };
-}
-
-async function localPost(path, body = {}) {
-  const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  const data = await res.json().catch(() => ({}));
-  return { status: res.status, data };
+async function localGet(path, { timeoutMs = LOCAL_TIMEOUT_MS, headers = {} } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`http://127.0.0.1:${PORT}${path}`, { signal: controller.signal, headers });
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data };
+  } catch (error) {
+    return {
+      status: 599,
+      data: {
+        ok: false,
+        error: 'local_fetch_failed',
+        reason: error?.name === 'AbortError' ? 'timeout' : 'internal_error',
+        message: String(error?.message || error)
+      }
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function externalGet(path, timeoutMs = 12000) {
@@ -95,6 +102,7 @@ function summarizeEvaluation(label, result) {
     timezone: d.timezone || null,
     postCount: d.post_count ?? null,
     source: d.threads_data_source || d.source || null,
+    insightFetchFailures: d.insight_fetch_failures ?? null,
     firstPost: first ? {
       post_id: first.post_id,
       post_timestamp: first.post_timestamp,
@@ -183,8 +191,9 @@ setTimeout(async () => {
     }));
 
     if (AUTOMATION_TOKEN) {
-      const token = encodeURIComponent(AUTOMATION_TOKEN);
-      const automationHealth = await localGet(`/threads/automation/health?automation_token=${token}`);
+      const automationHealth = await localGet('/threads/automation/health', {
+        headers: { 'x-cfe-automation-token': AUTOMATION_TOKEN }
+      });
       console.log('[THREADS_AUTOMATION_GATEWAY_TEST]', JSON.stringify({
         status: automationHealth.status,
         ok: automationHealth.data?.ok === true,
@@ -192,13 +201,6 @@ setTimeout(async () => {
         service: automationHealth.data?.service || null,
         primarySource: automationHealth.data?.primary_source || null,
         allowedRouteCount: Array.isArray(automationHealth.data?.allowed_routes) ? automationHealth.data.allowed_routes.length : 0
-      }));
-
-      const postAuth = await localPost(`/threads/automation/post?automation_token=${token}`, {});
-      console.log('[THREADS_AUTOMATION_POST_AUTH_TEST]', JSON.stringify({
-        status: postAuth.status,
-        passedAuth: postAuth.status === 400 && postAuth.data?.error === 'text_required',
-        error: postAuth.data?.error || null
       }));
     } else {
       console.log('[THREADS_AUTOMATION_GATEWAY_TEST]', JSON.stringify({ ok:false, configured:false, skipped:'CFE_AUTOMATION_TOKEN_missing' }));
@@ -278,6 +280,7 @@ setTimeout(async () => {
 }, 9000);
 
 setInterval(async () => {
+  if (supabaseSyncRunning) return;
   try {
     const evaluation = await localGet('/threads/evaluation-data?days=7');
     await syncEvaluationResult(evaluation, 'HOURLY_7D');
