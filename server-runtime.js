@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { URL } from 'node:url';
+import { getSupabaseStatus, writeSystemEvent } from './supabase-store.js';
 
 const PORT = Number(process.env.PORT || 10000);
 const AUTOMATION_TOKEN = process.env.CFE_AUTOMATION_TOKEN || '';
@@ -72,6 +73,41 @@ function summarizeEvaluation(label, result) {
 
 setTimeout(async () => {
   try {
+    const supabaseStatus = getSupabaseStatus();
+    console.log('[SUPABASE_CONFIG]', JSON.stringify(supabaseStatus));
+
+    if (supabaseStatus.configured) {
+      try {
+        const row = await writeSystemEvent({
+          component: 'cashflowengine-rakuten-bridge',
+          eventType: 'startup_test',
+          severity: 'info',
+          message: 'Render bridge successfully wrote a startup test event to Supabase.',
+          resolved: true,
+          resolution: 'supabase_connection_verified',
+          metadata: {
+            source: 'server-runtime',
+            test: true
+          }
+        });
+        console.log('[SUPABASE_WRITE_TEST]', JSON.stringify({
+          ok: true,
+          id: row?.id ?? null,
+          eventTime: row?.event_time ?? null
+        }));
+      } catch (e) {
+        console.error('[SUPABASE_WRITE_TEST]', JSON.stringify({
+          ok: false,
+          error: String(e?.message || e)
+        }));
+      }
+    } else {
+      console.log('[SUPABASE_WRITE_TEST]', JSON.stringify({
+        ok: false,
+        skipped: 'supabase_environment_missing'
+      }));
+    }
+
     const health = await localGet('/threads/health');
     console.log('[THREADS_GATEWAY_HEALTH_TEST]', JSON.stringify({
       status: health.status,
