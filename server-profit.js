@@ -1,10 +1,13 @@
 import http from 'node:http';
 import { URL } from 'node:url';
+import { getSupabaseStatus, saveDailyPlanLkg, loadDailyPlanLkg, writeSystemEvent } from './supabase-store.js';
 
-const APPLICATION_ID = process.env.RAKUTEN_APPLICATION_ID;
-const ACCESS_KEY = process.env.RAKUTEN_ACCESS_KEY;
-const AFFILIATE_ID = process.env.RAKUTEN_AFFILIATE_ID;
-
+const APPLICATION_ID = process.env.RAKUTEN_APPLICATION_ID || '';
+const ACCESS_KEY = process.env.RAKUTEN_ACCESS_KEY || '';
+const AFFILIATE_ID = process.env.RAKUTEN_AFFILIATE_ID || '';
+const SERVICE = 'cashflowengine-rakuten-bridge';
+const VERSION = 'cfe-daily-plan-2026.10.31.1';
+const SCORING_VERSION = 'expected-profit-v3';
 const SEARCH_API = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 const RANKING_API = 'https://openapi.rakuten.co.jp/ichibaranking/api/IchibaItem/Ranking/20220601';
 const CORE_THEMES = [
@@ -12,12 +15,47 @@ const CORE_THEMES = [
   'スマホ 便利グッズ','洗濯 便利グッズ','防寒 便利グッズ','料理 時短','新生活 便利グッズ'
 ];
 const CACHE_MS = 6 * 60 * 60 * 1000;
+const LKG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const UPSTREAM_TIMEOUT_MS = 5500;
+const UPSTREAM_ATTEMPTS = 2;
+const CONCURRENCY = 6;
+const MIN_CANDIDATES = 20;
+
 let planCache = null;
 let planGeneratedAt = 0;
 let building = null;
+const startedAt = new Date().toISOString();
+const diagnostics = {
+  service: 'ok',
+  configured: false,
+  rakutenApi: 'unknown',
+  candidateGeneration: 'unknown',
+  expectedProfitEngine: 'ok',
+  scoringVersion: SCORING_VERSION,
+  candidateCount: 0,
+  lastSuccessfulPlanAt: null,
+  lastError: null,
+  lastSource: null,
+  lkgAvailable: false,
+  selfTests: null
+};
 
+function nowIso() { return new Date().toISOString(); }
 function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
 function round(v, d = 2) { const p = 10 ** d; return Math.round(v * p) / p; }
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function configured() { return Boolean(APPLICATION_ID && ACCESS_KEY && AFFILIATE_ID); }
+function missingConfig() {
+  const missing = [];
+  if (!APPLICATION_ID) missing.push('RAKUTEN_APPLICATION_ID');
+  if (!ACCESS_KEY) missing.push('RAKUTEN_ACCESS_KEY');
+  if (!AFFILIATE_ID) missing.push('RAKUTEN_AFFILIATE_ID');
+  return missing;
+}
+function log(name, fields = {}) { console.log(`[${name}]`, JSON.stringify(fields)); }
+function logFailure(reason, retryable, extra = {}) {
+  console.error('[DAILY_PLAN_FAILED]', JSON.stringify({ reason, retryable, timestamp: nowIso(), ...extra }));
+}
 
 function seasonalThemes(date = new Date()) {
   const m = date.getUTCMonth() + 1;
@@ -45,7 +83,7 @@ function normalize(entry, extra = {}) {
     ...extra,
     itemName: item.itemName || null,
     catchcopy: item.catchcopy || null,
-    itemPrice: Number(item.itemPrice || 0) || null,
+    itemPrice: Number(item.itemPrice || 0) || 0,
     affiliateUrl: item.affiliateUrl || null,
     itemUrl: item.itemUrl || null,
     imageUrl: typeof image === 'string' ? image : image?.imageUrl || null,
@@ -67,7 +105,7 @@ function extractMatchTerms(item) {
   const dictionary = [
     '水筒','収納','掃除','洗濯','キッチン','乾燥','加湿','防寒','冷感','除湿','部屋干し','カビ','花粉',
     'スマホ','充電','料理','時短','排水口','水切り','耳かき','防災','台風','虫','紫外線','鍋','引っ越し',
-    '衣替え','大掃除','新生活','旅行','衛生','節約','時短','整理','消臭','暖房'
+    '衣替え','大掃除','新生活','旅行','衛生','節約','整理','消臭','暖房'
   ];
   return dictionary.filter(term => text.includes(term)).slice(0, 10);
 }
@@ -132,11 +170,14 @@ function estimatePriors(item) {
   const momentum = clamp(rankingMomentum(item.rankingRank) + ((item.origins || []).includes('core-search') && item.rankingRank ? 8 : 0), 0, 100);
   const predict = predictScore(item);
   const monetization = monetizationScore(item);
-
-  // These are conservative priors only. Live automation replaces them with observed post/account data.
   const expectedCtr = clamp(0.006 + quality / 10000 + momentum / 12000 + predict / 20000, 0.006, 0.035);
   const expectedCvr = clamp(0.008 + quality / 12000 + momentum / 18000, 0.008, 0.035);
   const reachIndex = clamp(20 + momentum * 0.50 + predict * 0.20 + quality * 0.25, 0, 100);
+  const expectedViews = Math.round(80 + reachIndex * 4.2);
+  const commissionRate = Number(item.affiliateRate || 0) > 0 ? Number(item.affiliateRate) / 100 : 0.01;
+  const expectedCommissionPerOrder = Math.max(1, Number(item.itemPrice || 0) * commissionRate);
+  const directCosts = 0;
+  const expectedNetProfit = Math.max(0, expectedViews * expectedCtr * expectedCvr * expectedCommissionPerOrder - directCosts);
 
   const signals = [
     item.rankingRank ? 1 : 0,
@@ -147,11 +188,9 @@ function estimatePriors(item) {
     item.pointRate >= 5 ? 1 : 0
   ].reduce((a,b) => a+b, 0);
   const confidence = clamp(0.30 + signals * 0.085, 0.30, 0.81);
-
-  // Comparable profit potential index, not a yen forecast.
-  const conversionValue = monetization * 0.42 + quality * 0.18;
-  const trafficValue = reachIndex * 0.22 + momentum * 0.10 + predict * 0.08;
-  const expectedProfitScore = clamp(conversionValue + trafficValue, 0, 100);
+  const profitComponent = clamp(Math.log10(1 + expectedNetProfit) * 35, 0, 70);
+  const supportComponent = quality * 0.12 + momentum * 0.08 + predict * 0.06 + monetization * 0.09;
+  const expectedProfitScore = clamp(profitComponent + supportComponent, 0, 100);
   const uncertainty = 1 - confidence;
   const upside = clamp(Math.max(momentum, predict, monetization) * 0.7 + quality * 0.3, 0, 100);
   const explorationBonus = clamp(uncertainty * upside * 0.24, 0, 18);
@@ -166,10 +205,15 @@ function estimatePriors(item) {
     explorationBonus: round(explorationBonus, 1),
     riskPenalty,
     priors: {
+      expectedViews,
       expectedCtr: round(expectedCtr, 4),
       expectedCvr: round(expectedCvr, 4),
+      expectedCommissionPerOrder: round(expectedCommissionPerOrder, 2),
+      directCosts,
+      expectedNetProfit: round(expectedNetProfit, 4),
       reachIndex: round(reachIndex, 1),
-      monetizationScore: round(monetization, 1)
+      monetizationScore: round(monetization, 1),
+      updateRule: 'posterior = prior + observed_data_when_sample_is_sufficient'
     },
     spearSignals: {
       momentum: round(momentum, 1),
@@ -178,6 +222,48 @@ function estimatePriors(item) {
       quality: round(quality, 1)
     }
   };
+}
+
+function classifyFailure(error) {
+  const code = String(error?.code || '');
+  const status = Number(error?.status || 0);
+  const message = String(error?.message || error || '').toLowerCase();
+  if (code === 'NOT_CONFIGURED' || message.includes('not_configured')) return { reason:'not_configured', retryable:false };
+  if (code === 'CANDIDATE_GENERATION_FAILED') return { reason:'candidate_generation_failed', retryable:true };
+  if (code === 'SCORING_FAILED') return { reason:'expected_profit_scoring_failed', retryable:false };
+  if (code === 'CACHE_UNAVAILABLE') return { reason:'cache_unavailable', retryable:true };
+  if (message.includes('timeout') || message.includes('abort')) return { reason:'rakuten_api_timeout', retryable:true };
+  if (status === 429) return { reason:'rakuten_rate_limit', retryable:true };
+  if (status >= 400) return { reason:'rakuten_api_error', retryable:status >= 500 };
+  return { reason:'internal_error', retryable:false };
+}
+
+async function fetchJson(url, { attempts = UPSTREAM_ATTEMPTS, timeoutMs = UPSTREAM_TIMEOUT_MS } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const e = new Error(`rakuten_api_${res.status}`);
+        e.status = res.status;
+        e.details = data;
+        throw e;
+      }
+      return data;
+    } catch (e) {
+      lastError = e;
+      if (e?.name === 'AbortError') lastError = Object.assign(new Error('rakuten_api_timeout'), { status: 504 });
+      const classified = classifyFailure(lastError);
+      if (!classified.retryable || attempt >= attempts) break;
+      await delay(attempt === 1 ? 450 : 900);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastError || new Error('rakuten_api_error');
 }
 
 async function searchTheme(theme, origin) {
@@ -191,9 +277,7 @@ async function searchTheme(theme, origin) {
     sort: '-reviewCount',
     availability: '1'
   });
-  const res = await fetch(`${SEARCH_API}?${qs}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`${theme}: ${res.status} ${JSON.stringify(data)}`);
+  const data = await fetchJson(`${SEARCH_API}?${qs}`);
   return (data.Items || data.items || []).map(x => normalize(x, { theme, origins: [origin] }));
 }
 
@@ -207,9 +291,7 @@ async function fetchRanking() {
     period: 'realtime',
     page: '1'
   });
-  const res = await fetch(`${RANKING_API}?${qs}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(`ranking: ${res.status} ${JSON.stringify(data)}`);
+  const data = await fetchJson(`${RANKING_API}?${qs}`);
   return (data.Items || data.items || []).map((x, i) => {
     const item = x?.Item || x?.item || x || {};
     return normalize(item, {
@@ -220,6 +302,21 @@ async function fetchRanking() {
   });
 }
 
+async function mapWithConcurrency(items, worker, limit = CONCURRENCY) {
+  const results = new Array(items.length);
+  let index = 0;
+  async function runner() {
+    while (true) {
+      const i = index++;
+      if (i >= items.length) return;
+      try { results[i] = { ok:true, value:await worker(items[i], i) }; }
+      catch (error) { results[i] = { ok:false, error }; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => runner()));
+  return results;
+}
+
 function mergeRows(rows) {
   const merged = new Map();
   for (const row of rows) {
@@ -227,16 +324,11 @@ function mergeRows(rows) {
     if (!key) continue;
     const prev = merged.get(key);
     if (!prev) { merged.set(key, row); continue; }
-    const origins = [...new Set([...(prev.origins || []), ...(row.origins || [])])];
-    const themes = [...new Set([
-      ...String(prev.theme || '').split(' / ').filter(Boolean),
-      ...String(row.theme || '').split(' / ').filter(Boolean)
-    ])];
     merged.set(key, {
       ...prev,
       ...row,
-      origins,
-      theme: themes.join(' / '),
+      origins: [...new Set([...(prev.origins || []), ...(row.origins || [])])],
+      theme: [...new Set([...String(prev.theme || '').split(' / ').filter(Boolean), ...String(row.theme || '').split(' / ').filter(Boolean)])].join(' / '),
       rankingRank: row.rankingRank || prev.rankingRank || null
     });
   }
@@ -244,23 +336,20 @@ function mergeRows(rows) {
 }
 
 function rankByProfit(rows, limit = 20) {
-  const ranked = rows.map(item => ({
-    ...item,
-    ...estimatePriors(item),
-    buzzMatchTerms: extractMatchTerms(item)
-  })).sort((a,b) =>
-    b.selectionScore - a.selectionScore ||
-    b.expectedProfitScore - a.expectedProfitScore ||
-    (a.rankingRank || 9999) - (b.rankingRank || 9999)
-  );
-
-  // Exploit top expected-profit candidates, but reserve one high-upside uncertain candidate in top 5.
+  let ranked;
+  try {
+    ranked = rows
+      .filter(item => Boolean(item.affiliateUrl))
+      .map(item => ({ ...item, ...estimatePriors(item), buzzMatchTerms: extractMatchTerms(item) }))
+      .sort((a,b) => b.selectionScore - a.selectionScore || b.expectedProfitScore - a.expectedProfitScore || (a.rankingRank || 9999) - (b.rankingRank || 9999));
+  } catch (error) {
+    error.code = 'SCORING_FAILED';
+    throw error;
+  }
   const topExploit = ranked.slice(0, 4);
   const used = new Set(topExploit.map(x => x.itemCode || x.itemUrl));
-  const exploration = ranked
-    .filter(x => !used.has(x.itemCode || x.itemUrl))
-    .sort((a,b) => b.explorationBonus - a.explorationBonus || b.expectedProfitScore - a.expectedProfitScore)[0];
-  const ordered = exploration ? [...topExploit, { ...exploration, portfolioRole: 'explore' }] : [...topExploit];
+  const exploration = ranked.filter(x => !used.has(x.itemCode || x.itemUrl)).sort((a,b) => b.explorationBonus - a.explorationBonus || b.expectedProfitScore - a.expectedProfitScore)[0];
+  const ordered = exploration ? [...topExploit, { ...exploration, portfolioRole:'explore' }] : [...topExploit];
   const orderedKeys = new Set(ordered.map(x => x.itemCode || x.itemUrl));
   for (const row of ranked) {
     if (ordered.length >= limit) break;
@@ -270,89 +359,289 @@ function rankByProfit(rows, limit = 20) {
   }
   return ordered.slice(0, limit).map((item, i) => ({
     rank: i + 1,
+    productName: item.itemName || '',
+    itemName: item.itemName || '',
+    score: round(item.selectionScore, 1),
+    expectedProfitScore: item.expectedProfitScore,
+    confidence: item.confidence,
+    price: Number(item.itemPrice || 0),
+    itemPrice: Number(item.itemPrice || 0),
+    reviewCount: Number(item.reviewCount || 0),
+    reviewAverage: Number(item.reviewAverage || 0),
+    theme: item.theme || '',
+    buzzMatchTerms: item.buzzMatchTerms || [],
+    affiliateUrl: item.affiliateUrl,
+    priors: item.priors || {},
     portfolioRole: item.portfolioRole || (i < 4 ? 'exploit' : 'ranked'),
-    ...item
+    selectionScore: item.selectionScore,
+    uncertainty: item.uncertainty,
+    explorationBonus: item.explorationBonus,
+    riskPenalty: item.riskPenalty,
+    spearSignals: item.spearSignals,
+    itemUrl: item.itemUrl || null,
+    itemCode: item.itemCode || null,
+    shopName: item.shopName || null,
+    affiliateRate: item.affiliateRate || 0,
+    pointRate: item.pointRate || 0,
+    rankingRank: item.rankingRank || null,
+    origins: item.origins || []
   }));
 }
 
 async function buildProfitPlan() {
-  if (!APPLICATION_ID || !ACCESS_KEY || !AFFILIATE_ID) throw new Error('rakuten_credentials_not_configured');
+  log('DAILY_PLAN_REQUEST_STARTED', { timestamp:nowIso() });
+  if (!configured()) {
+    const e = new Error('rakuten_credentials_not_configured');
+    e.code = 'NOT_CONFIGURED';
+    throw e;
+  }
   const all = [];
   const errors = [];
   const seasonal = seasonalThemes(new Date());
+  const tasks = [
+    ...CORE_THEMES.map(theme => ({ type:'search', theme, origin:'core-search' })),
+    ...seasonal.map(theme => ({ type:'search', theme, origin:'seasonal-search' })),
+    { type:'ranking' }
+  ];
 
-  for (const theme of CORE_THEMES) {
-    try { all.push(...await searchTheme(theme, 'core-search')); }
-    catch (e) { errors.push({ source:'search', theme, message:e.message }); }
+  log('RAKUTEN_FETCH_STARTED', { taskCount:tasks.length, concurrency:CONCURRENCY, timeoutMs:UPSTREAM_TIMEOUT_MS, attempts:UPSTREAM_ATTEMPTS });
+  const results = await mapWithConcurrency(tasks, async task => task.type === 'ranking' ? fetchRanking() : searchTheme(task.theme, task.origin));
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const task = tasks[i];
+    if (result.ok) all.push(...result.value);
+    else {
+      const classified = classifyFailure(result.error);
+      errors.push({ source:task.type, theme:task.theme || null, reason:classified.reason, retryable:classified.retryable, status:Number(result.error?.status || 0) || null });
+    }
   }
-  for (const theme of seasonal) {
-    try { all.push(...await searchTheme(theme, 'seasonal-search')); }
-    catch (e) { errors.push({ source:'seasonal-search', theme, message:e.message }); }
-  }
-  try { all.push(...await fetchRanking()); }
-  catch (e) { errors.push({ source:'ranking', message:e.message }); }
+  diagnostics.rakutenApi = errors.length === tasks.length ? 'failed' : errors.length ? 'degraded' : 'ok';
+  log('RAKUTEN_FETCH_OK', { successfulTasks:tasks.length - errors.length, failedTasks:errors.length, rawCandidateCount:all.length });
 
+  log('CANDIDATES_GENERATED', { count:mergeRows(all).length });
+  diagnostics.candidateGeneration = all.length ? 'ok' : 'failed';
+  log('EXPECTED_PROFIT_SCORING_STARTED', { scoringVersion:SCORING_VERSION });
   const candidates = rankByProfit(mergeRows(all), 20);
+  log('EXPECTED_PROFIT_SCORING_OK', { scoringVersion:SCORING_VERSION, candidateCount:candidates.length });
+  if (candidates.length < MIN_CANDIDATES) {
+    const e = new Error(`insufficient_candidates:${candidates.length}`);
+    e.code = 'CANDIDATE_GENERATION_FAILED';
+    e.partialErrors = errors;
+    throw e;
+  }
+
   planGeneratedAt = Date.now();
   planCache = {
-    ok: candidates.length > 0,
+    ok: true,
+    source: 'live',
+    stale: false,
     generatedAt: new Date(planGeneratedAt).toISOString(),
-    scoringVersion: 'expected-profit-v3',
-    objective: 'maximize_net_profit_as_fast_as_possible',
-    strategy: {
-      signalLayer: ['momentum','buzz-match','predict'],
-      ranking: 'expected-profit-first',
-      fixedSpearAllocation: false,
-      exploitShareTarget: 0.8,
-      exploreShareTarget: 0.2,
-      calibration: 'daily automation replaces conservative priors with observed 7-day account/post CTR, CVR, commission and cost data',
-      warning: 'expectedProfitScore is a comparable index, not a yen forecast, until observed attribution data is sufficient'
-    },
-    sources: ['IchibaItemSearch-20260701','IchibaItemRanking-20220601'],
-    themes: { core: CORE_THEMES, seasonal },
+    scoringVersion: SCORING_VERSION,
     candidateCount: candidates.length,
+    objective: 'maximize_expected_net_profit',
+    formula: 'Expected Views × Expected CTR × Expected CVR × Expected Commission per Order − Direct Costs',
+    calibration: 'Conservative priors are used until observed account/post attribution has sufficient sample size; posterior updates must not overfit one-click/one-conversion events.',
     candidates,
-    errors
+    warnings: errors,
+    sources: ['IchibaItemSearch-20260701','IchibaItemRanking-20220601']
   };
-  console.log('[EXPECTED_PROFIT_PLAN]', JSON.stringify({
-    generatedAt: planCache.generatedAt,
-    candidateCount: candidates.length,
-    top5: candidates.slice(0,5).map(x => ({ rank:x.rank, role:x.portfolioRole, expectedProfitScore:x.expectedProfitScore, selectionScore:x.selectionScore, confidence:x.confidence, itemName:x.itemName })),
-    errors: errors.length
-  }));
+  diagnostics.candidateCount = candidates.length;
+  diagnostics.lastSuccessfulPlanAt = planCache.generatedAt;
+  diagnostics.lastError = null;
+  diagnostics.lastSource = 'live';
+  diagnostics.expectedProfitEngine = 'ok';
+  log('DAILY_PLAN_GENERATED', { generatedAt:planCache.generatedAt, candidateCount:candidates.length, scoringVersion:SCORING_VERSION, warningCount:errors.length });
+
+  if (getSupabaseStatus().configured) {
+    saveDailyPlanLkg(planCache)
+      .then(() => { diagnostics.lkgAvailable = true; })
+      .catch(error => console.error('[DAILY_PLAN_LKG_SAVE_FAILED]', JSON.stringify({ error:String(error?.message || error) })));
+  }
   return planCache;
+}
+
+async function loadFreshLkg() {
+  try {
+    if (!getSupabaseStatus().configured) return null;
+    const cached = await loadDailyPlanLkg();
+    if (!cached?.plan) return null;
+    const generatedMs = Date.parse(cached.plan.generatedAt || cached.eventTime || 0);
+    const ageMs = Number.isFinite(generatedMs) ? Date.now() - generatedMs : Infinity;
+    const ageMinutes = Math.max(0, Math.round(ageMs / 60000));
+    diagnostics.lkgAvailable = true;
+    if (ageMs > LKG_MAX_AGE_MS) return { expired:true, ageMinutes, plan:cached.plan };
+    return {
+      expired:false,
+      ageMinutes,
+      plan: {
+        ...cached.plan,
+        ok: true,
+        source: 'last_known_good',
+        stale: true,
+        ageMinutes,
+        lkgLoadedAt: nowIso()
+      }
+    };
+  } catch (error) {
+    console.error('[DAILY_PLAN_LKG_LOAD_FAILED]', JSON.stringify({ error:String(error?.message || error) }));
+    return null;
+  }
 }
 
 async function getProfitPlan() {
   if (planCache && Date.now() - planGeneratedAt < CACHE_MS) return planCache;
   if (!building) building = buildProfitPlan().finally(() => { building = null; });
-  return building;
+  try {
+    return await building;
+  } catch (error) {
+    const classified = classifyFailure(error);
+    diagnostics.lastError = { reason:classified.reason, retryable:classified.retryable, timestamp:nowIso() };
+    diagnostics.lastSource = null;
+    logFailure(classified.reason, classified.retryable);
+    const lkg = await loadFreshLkg();
+    if (lkg && !lkg.expired) {
+      diagnostics.lastSource = 'last_known_good';
+      return lkg.plan;
+    }
+    const e = new Error(String(error?.message || error));
+    e.reason = lkg?.expired ? 'cache_unavailable' : classified.reason;
+    e.retryable = lkg?.expired ? true : classified.retryable;
+    e.originalReason = classified.reason;
+    e.lkgAgeMinutes = lkg?.ageMinutes ?? null;
+    throw e;
+  }
+}
+
+function structuredError(error) {
+  const reason = error?.reason || classifyFailure(error).reason;
+  const retryable = typeof error?.retryable === 'boolean' ? error.retryable : classifyFailure(error).retryable;
+  return {
+    ok: false,
+    error: 'expected_profit_plan_unavailable',
+    reason,
+    retryable,
+    scoringVersion: SCORING_VERSION,
+    timestamp: nowIso(),
+    ...(error?.lkgAgeMinutes !== null && error?.lkgAgeMinutes !== undefined ? { lkgAgeMinutes:error.lkgAgeMinutes } : {})
+  };
+}
+
+function healthBody() {
+  const isConfigured = configured();
+  diagnostics.configured = isConfigured;
+  const dependencyRakuten = !isConfigured ? 'not_configured' : diagnostics.rakutenApi === 'failed' ? 'degraded' : 'ok';
+  return {
+    ok: true,
+    configured: isConfigured,
+    service: SERVICE,
+    version: VERSION,
+    scoringVersion: SCORING_VERSION,
+    timestamp: nowIso(),
+    startedAt,
+    dependencies: {
+      rakuten: dependencyRakuten,
+      expectedProfitEngine: diagnostics.expectedProfitEngine === 'failed' ? 'degraded' : 'ok'
+    },
+    dailyPlan: {
+      ready: Boolean(planCache),
+      candidateCount: planCache?.candidateCount || diagnostics.candidateCount || 0,
+      lastSuccessfulPlanAt: diagnostics.lastSuccessfulPlanAt,
+      source: diagnostics.lastSource,
+      lkgAvailable: diagnostics.lkgAvailable
+    },
+    ...(isConfigured ? {} : { missingConfiguration:missingConfig() })
+  };
+}
+
+function diagnosticsBody() {
+  return {
+    ...diagnostics,
+    service: 'ok',
+    configured: configured(),
+    scoringVersion: SCORING_VERSION,
+    version: VERSION,
+    timestamp: nowIso(),
+    missingConfiguration: configured() ? [] : missingConfig()
+  };
+}
+
+async function runFailureSelfTests() {
+  const tests = {
+    rakutenTimeout: { passed:false },
+    scoringException: { passed:false },
+    missingConfig: { passed:!configured() ? true : 'not_applicable_runtime_configured' }
+  };
+  try {
+    const fakeTimeout = Object.assign(new Error('rakuten_api_timeout'), { status:504 });
+    const x = classifyFailure(fakeTimeout);
+    tests.rakutenTimeout = { passed:x.reason === 'rakuten_api_timeout' && x.retryable === true, reason:x.reason, retryable:x.retryable };
+  } catch (error) { tests.rakutenTimeout = { passed:false, error:String(error?.message || error) }; }
+  try {
+    const fakeScoring = Object.assign(new Error('simulated_scoring_failure'), { code:'SCORING_FAILED' });
+    const x = classifyFailure(fakeScoring);
+    tests.scoringException = { passed:x.reason === 'expected_profit_scoring_failed' && x.retryable === false, reason:x.reason, retryable:x.retryable };
+  } catch (error) { tests.scoringException = { passed:false, error:String(error?.message || error) }; }
+  diagnostics.selfTests = tests;
+  log('DAILY_PLAN_SELF_TESTS', tests);
+  return tests;
 }
 
 const originalCreateServer = http.createServer.bind(http);
 http.createServer = function patchedCreateServer(listener) {
   return originalCreateServer(async (req, res) => {
+    const writeJson = (status, body) => {
+      res.writeHead(status, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*'
+      });
+      res.end(JSON.stringify(body));
+    };
     try {
-      const url = new URL(req.url, `http://${req.headers.host}`);
-      if ((url.pathname === '/daily-plan' || url.pathname === '/profit-plan' || url.pathname === '/three-spear-plan') && req.method === 'GET') {
-        const plan = await getProfitPlan();
-        res.writeHead(plan.ok ? 200 : 503, {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'Access-Control-Allow-Origin': '*'
-        });
-        res.end(JSON.stringify(plan));
-        return;
+      const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+      if (url.pathname === '/health' && req.method === 'GET') {
+        log('HEALTH_OK', { configured:configured(), scoringVersion:SCORING_VERSION });
+        return writeJson(200, healthBody());
       }
-    } catch (e) {
+      if (url.pathname === '/diagnostics/daily-plan' && req.method === 'GET') {
+        return writeJson(200, diagnosticsBody());
+      }
+      if ((url.pathname === '/daily-plan' || url.pathname === '/profit-plan' || url.pathname === '/three-spear-plan') && req.method === 'GET') {
+        try {
+          const plan = await getProfitPlan();
+          return writeJson(200, plan);
+        } catch (error) {
+          const body = structuredError(error);
+          return writeJson(body.reason === 'not_configured' ? 503 : 503, body);
+        }
+      }
+    } catch (error) {
       if (req.url?.startsWith('/daily-plan') || req.url?.startsWith('/profit-plan') || req.url?.startsWith('/three-spear-plan')) {
-        res.writeHead(503, { 'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store' });
-        res.end(JSON.stringify({ ok:false, error:'expected_profit_plan_unavailable', message:String(e?.message || e) }));
-        return;
+        const body = structuredError(error);
+        return writeJson(503, body);
       }
     }
     return listener(req, res);
   });
 };
+
+setTimeout(() => runFailureSelfTests().catch(() => {}), 1200);
+setTimeout(() => {
+  if (!configured()) return;
+  getProfitPlan().catch(async error => {
+    const classified = classifyFailure(error);
+    diagnostics.lastError = { reason:classified.reason, retryable:classified.retryable, timestamp:nowIso() };
+    try {
+      await writeSystemEvent({
+        component: 'expected-profit-engine',
+        eventType: 'startup_plan_failed',
+        severity: 'warning',
+        message: 'Expected Profit v3 startup plan generation failed.',
+        resolved: false,
+        metadata: { reason:classified.reason, retryable:classified.retryable }
+      });
+    } catch {}
+  });
+}, 1800);
 
 await import('./server.js');
