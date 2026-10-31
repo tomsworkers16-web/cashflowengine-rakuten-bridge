@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server-profit.js"
+    "start": "node server-threads-gateway.js"
   },
   "engines": {
     "node": ">=20"
