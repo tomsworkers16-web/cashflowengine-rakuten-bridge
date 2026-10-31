@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prestart": "npm test",
     "start": "node automation-context.js",
     "test": "node --check automation-context.js && node --check server-runtime.js && node --check server-automation-gateway.js && node --check server-threads-gateway.js && node --check server-profit.js && node --check server.js && node --check supabase-store.js"
   },
