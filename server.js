@@ -14,12 +14,6 @@ const THREADS_USER_ID = process.env.THREADS_USER_ID;
 const THREADS_SMOKE_THREAD_ID = process.env.THREADS_SMOKE_THREAD_ID;
 
 const API_BASE = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
-const DAILY_THEMES = [
-  '便利グッズ', '時短 家事', 'キッチン 便利', '収納 便利', '掃除 便利グッズ',
-  'スマホ 便利グッズ', '洗濯 便利グッズ', '防寒 便利グッズ', '料理 時短', '新生活 便利グッズ'
-];
-let dailyPlanCache = null;
-let dailyPlanGeneratedAt = null;
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -193,22 +187,12 @@ async function searchRakuten({keyword,hits=10,sort='-reviewCount',minPrice,maxPr
   const rawItems=data.Items||data.items||[]; return {meta:{page:data.page,pageCount:data.pageCount,hits:data.hits,count:data.count},items:rawItems.map(normalizeItem)};
 }
 
-async function buildDailyPlan() {
-  const all=[]; const errors=[];
-  for(const theme of DAILY_THEMES){try{const result=await searchRakuten({keyword:theme,hits:20,sort:'-reviewCount'});for(const item of result.items)all.push({theme,...item,...scoreItem(item)});}catch(error){errors.push({theme,status:error?.status||null,message:String(error?.message||error)});}}
-  const seen=new Set(); const candidates=all.sort((a,b)=>b.score-a.score||b.reviewCount-a.reviewCount).filter(item=>{const key=item.itemCode||item.itemUrl;if(!key||seen.has(key))return false;seen.add(key);return true;}).slice(0,20).map((item,i)=>({rank:i+1,...item}));
-  dailyPlanGeneratedAt=new Date().toISOString(); dailyPlanCache={ok:candidates.length>0,generatedAt:dailyPlanGeneratedAt,scoringVersion:'rakumitsu-v2',themes:DAILY_THEMES,candidateCount:candidates.length,candidates,errors};
-  console.log('[DAILY_PLAN]',JSON.stringify({generatedAt:dailyPlanGeneratedAt,candidateCount:candidates.length,top5:candidates.slice(0,5).map(x=>({rank:x.rank,theme:x.theme,score:x.score,itemName:x.itemName,reviewCount:x.reviewCount,reviewAverage:x.reviewAverage,itemPrice:x.itemPrice}))}));
-  return dailyPlanCache;
-}
-
 const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,`http://${req.headers.host}`);
     if(url.pathname==='/pinterest') return html(res,200,pinterestInfoPage());
     if(url.pathname==='/privacy') return html(res,200,privacyPage());
-    if(url.pathname==='/health') return json(res,200,{ok:true,service:'cashflowengine-rakuten-bridge',configured:configured(),apiVersion:'20260701',dailyPlanGeneratedAt,threads:{configured:threadsConfigured(),apiBase:THREADS_API_BASE}});
-    if(url.pathname==='/daily-plan'){if(!dailyPlanCache)return json(res,503,{ok:false,error:'daily_plan_not_ready'});return json(res,200,dailyPlanCache);}
+    if(url.pathname==='/health') return json(res,200,{ok:true,service:'cashflowengine-rakuten-bridge',configured:configured(),apiVersion:'20260701',threads:{configured:threadsConfigured(),apiBase:THREADS_API_BASE}});
     if(url.pathname==='/threads/health'){const r=await threadsSelftest();return json(res,r.ok?200:(r.configured?502:503),r);}
     if(url.pathname.startsWith('/threads/')){
       if(!authOk(req))return json(res,401,{error:'unauthorized'}); if(!threadsConfigured())return json(res,503,{error:'threads_credentials_not_configured'});
@@ -232,10 +216,9 @@ async function runStartupJobs(){
   if(!configured())console.log('[SELFTEST] skipped: Rakuten credentials not fully configured');
   else{
     try{const result=await searchRakuten({keyword:'キッチン 便利グッズ',hits:1,sort:'-reviewCount'});const first=result.items[0];console.log('[SELFTEST]',JSON.stringify({ok:Boolean(first),itemReturned:Boolean(first),hasAffiliateUrl:Boolean(first?.affiliateUrl),itemName:first?.itemName||null,reviewCount:first?.reviewCount||0,reviewAverage:first?.reviewAverage||0}));}catch(error){console.error('[SELFTEST]',JSON.stringify({ok:false,status:error?.status||null,message:String(error?.message||error),details:error?.details||null}));}
-    try{await buildDailyPlan();}catch(error){console.error('[DAILY_PLAN_ERROR]',String(error?.message||error));}
   }
   const threadsTest=await threadsSelftest(); console.log('[THREADS_SELFTEST]',JSON.stringify(threadsTest));
   if(threadsTest.ok&&THREADS_SMOKE_THREAD_ID){const readSmoke=await threadsReadSmokeTest(THREADS_SMOKE_THREAD_ID);console.log('[THREADS_READ_SMOKE]',JSON.stringify(readSmoke));}
 }
 
-server.listen(PORT,'0.0.0.0',()=>{console.log(`Cash Flow Engine bridge listening on ${PORT}`);setTimeout(runStartupJobs,1500);setInterval(()=>buildDailyPlan().catch(e=>console.error('[DAILY_PLAN_ERROR]',String(e?.message||e))),6*60*60*1000);});
+server.listen(PORT,'0.0.0.0',()=>{console.log(`Cash Flow Engine bridge listening on ${PORT}`);setTimeout(runStartupJobs,1500);});
