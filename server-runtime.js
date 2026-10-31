@@ -4,6 +4,7 @@ import { getSupabaseStatus, writeSystemEvent, syncThreadsEvaluation } from './su
 
 const PORT = Number(process.env.PORT || 10000);
 const AUTOMATION_TOKEN = process.env.CFE_AUTOMATION_TOKEN || '';
+const EXTERNAL_BASE = (process.env.RENDER_EXTERNAL_URL || 'https://cashflowengine-rakuten-bridge.onrender.com').replace(/\/$/, '');
 let supabaseSyncRunning = false;
 
 const originalCreateServer = http.createServer.bind(http);
@@ -40,6 +41,18 @@ async function localPost(path, body = {}) {
   });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
+}
+
+async function externalGet(path, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${EXTERNAL_BASE}${path}`, { signal: controller.signal, headers: { 'User-Agent': 'CashFlowEngine-SelfTest/1.0' } });
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function summarizeEvaluation(label, result) {
@@ -117,11 +130,7 @@ setTimeout(async () => {
           resolution: 'supabase_connection_verified',
           metadata: { source: 'server-runtime', test: true }
         });
-        console.log('[SUPABASE_WRITE_TEST]', JSON.stringify({
-          ok: true,
-          id: row?.id ?? null,
-          eventTime: row?.event_time ?? null
-        }));
+        console.log('[SUPABASE_WRITE_TEST]', JSON.stringify({ ok: true, id: row?.id ?? null, eventTime: row?.event_time ?? null }));
       } catch (e) {
         console.error('[SUPABASE_WRITE_TEST]', JSON.stringify({ ok: false, error: String(e?.message || e) }));
       }
@@ -182,6 +191,61 @@ setTimeout(async () => {
     console.error('[THREADS_GATEWAY_STARTUP_TEST_ERROR]', String(e?.message || e));
   }
 }, 2500);
+
+setTimeout(async () => {
+  try {
+    const health = await externalGet('/health');
+    console.log('[EXTERNAL_HEALTH_CONTRACT_TEST]', JSON.stringify({
+      status: health.status,
+      ok: health.data?.ok === true,
+      configured: health.data?.configured === true,
+      scoringVersion: health.data?.scoringVersion || null,
+      service: health.data?.service || null,
+      passed: health.status === 200 && health.data?.ok === true && health.data?.configured === true && health.data?.scoringVersion === 'expected-profit-v3'
+    }));
+
+    let plan = null;
+    const waits = [0, 2000, 5000];
+    for (let i = 0; i < waits.length; i++) {
+      if (waits[i]) await new Promise(resolve => setTimeout(resolve, waits[i]));
+      plan = await externalGet('/daily-plan');
+      const retryable = plan.status === 503 || plan.data?.retryable === true;
+      if (plan.status === 200 && plan.data?.ok === true) break;
+      if (!retryable) break;
+      await externalGet('/health').catch(() => null);
+    }
+    const candidates = Array.isArray(plan?.data?.candidates) ? plan.data.candidates : [];
+    const required = ['productName','score','expectedProfitScore','confidence','price','reviewCount','reviewAverage','theme','buzzMatchTerms','affiliateUrl','priors'];
+    const validContractCount = candidates.filter(c => required.every(k => c?.[k] !== undefined && c?.[k] !== null)).length;
+    const affiliateUrlValidCount = candidates.filter(c => typeof c?.affiliateUrl === 'string' && /^https?:\/\//.test(c.affiliateUrl)).length;
+    console.log('[EXTERNAL_DAILY_PLAN_CONTRACT_TEST]', JSON.stringify({
+      status: plan?.status ?? null,
+      ok: plan?.data?.ok === true,
+      scoringVersion: plan?.data?.scoringVersion || null,
+      source: plan?.data?.source || null,
+      stale: plan?.data?.stale === true,
+      candidateCount: candidates.length,
+      validContractCount,
+      affiliateUrlValidCount,
+      passed: plan?.status === 200 && plan?.data?.ok === true && plan?.data?.scoringVersion === 'expected-profit-v3' && candidates.length >= 20 && validContractCount >= 20 && affiliateUrlValidCount >= 20
+    }));
+
+    const diag = await externalGet('/diagnostics/daily-plan');
+    console.log('[EXTERNAL_DAILY_PLAN_DIAGNOSTICS_TEST]', JSON.stringify({
+      status: diag.status,
+      configured: diag.data?.configured === true,
+      rakutenApi: diag.data?.rakutenApi || null,
+      candidateGeneration: diag.data?.candidateGeneration || null,
+      expectedProfitEngine: diag.data?.expectedProfitEngine || null,
+      candidateCount: diag.data?.candidateCount ?? null,
+      lastSuccessfulPlanAt: diag.data?.lastSuccessfulPlanAt || null,
+      lastError: diag.data?.lastError || null,
+      selfTests: diag.data?.selfTests || null
+    }));
+  } catch (e) {
+    console.error('[EXTERNAL_DAILY_PLAN_CONTRACT_TEST]', JSON.stringify({ passed:false, error:String(e?.message || e) }));
+  }
+}, 9000);
 
 setInterval(async () => {
   try {
