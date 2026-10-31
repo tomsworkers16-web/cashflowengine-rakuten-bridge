@@ -60,6 +60,40 @@ export async function writeSystemEvent({
   return Array.isArray(data) ? data[0] : data;
 }
 
+export async function saveDailyPlanLkg(plan) {
+  if (!plan?.ok || plan?.scoringVersion !== 'expected-profit-v3' || !Array.isArray(plan?.candidates) || plan.candidates.length < 20) {
+    throw new Error('daily_plan_lkg_invalid');
+  }
+  return writeSystemEvent({
+    component: 'expected-profit-engine',
+    eventType: 'daily_plan_lkg',
+    severity: 'info',
+    message: 'Last known good Expected Profit v3 daily plan.',
+    resolved: true,
+    resolution: 'plan_generated',
+    metadata: {
+      scoringVersion: plan.scoringVersion,
+      generatedAt: plan.generatedAt,
+      candidateCount: plan.candidates.length,
+      plan
+    }
+  });
+}
+
+export async function loadDailyPlanLkg() {
+  const rows = await supabaseRequest(
+    'system_events?select=id,event_time,metadata&component=eq.expected-profit-engine&event_type=eq.daily_plan_lkg&order=event_time.desc&limit=1'
+  );
+  const row = Array.isArray(rows) && rows.length ? rows[0] : null;
+  const plan = row?.metadata?.plan || null;
+  if (!plan || plan?.scoringVersion !== 'expected-profit-v3' || !Array.isArray(plan?.candidates)) return null;
+  return {
+    id: row.id,
+    eventTime: row.event_time,
+    plan
+  };
+}
+
 function encodeEq(value) {
   return encodeURIComponent(String(value ?? ''));
 }
