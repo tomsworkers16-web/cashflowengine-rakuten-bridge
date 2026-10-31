@@ -10,7 +10,9 @@ const PINTEREST_ACCESS_TOKEN = process.env.PINTEREST_ACCESS_TOKEN || '';
 const PINTEREST_REFRESH_TOKEN = process.env.PINTEREST_REFRESH_TOKEN || '';
 const PINTEREST_REDIRECT_URI = process.env.PINTEREST_REDIRECT_URI || '';
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || '';
+const AUTOMATION_TOKEN = process.env.CFE_AUTOMATION_TOKEN || '';
 const OAUTH_STATE_SECRET = process.env.PINTEREST_OAUTH_STATE_SECRET || BRIDGE_TOKEN || '';
+const PRIMARY_SOURCE = 'pinterest_official_api';
 
 function json(res, status, body) {
   res.writeHead(status, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'*'});
@@ -18,6 +20,8 @@ function json(res, status, body) {
 }
 function html(res,status,body){res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'});res.end(body);}
 function authOk(req){return Boolean(BRIDGE_TOKEN) && (req.headers.authorization||'')===`Bearer ${BRIDGE_TOKEN}`;}
+function safeEqual(a,b){const aa=Buffer.from(String(a||''));const bb=Buffer.from(String(b||''));if(!aa.length||aa.length!==bb.length)return false;return crypto.timingSafeEqual(aa,bb);}
+function automationAuthOk(req,url){const supplied=req.headers['x-cfe-automation-token']||url.searchParams.get('automation_token')||'';return Boolean(AUTOMATION_TOKEN&&BRIDGE_TOKEN)&&safeEqual(supplied,AUTOMATION_TOKEN);}
 function appConfigured(){return Boolean(PINTEREST_APP_ID && PINTEREST_APP_SECRET && PINTEREST_REDIRECT_URI);}
 function tokenConfigured(){return Boolean(PINTEREST_ACCESS_TOKEN);}
 function signState(nonce){return crypto.createHmac('sha256',OAUTH_STATE_SECRET).update(nonce).digest('hex');}
@@ -62,16 +66,31 @@ function oauthUrl(){
 }
 
 async function health(){
-  const base={ok:false,appConfigured:appConfigured(),tokenConfigured:tokenConfigured(),redirectUri:PINTEREST_REDIRECT_URI||null};
+  const base={ok:false,appConfigured:appConfigured(),tokenConfigured:tokenConfigured(),redirectUri:PINTEREST_REDIRECT_URI||null,primary_source:PRIMARY_SOURCE,current_primary_source:PRIMARY_SOURCE};
   if(!tokenConfigured())return base;
   try{const me=await pinterestRequest('/user_account');return {...base,ok:true,username:me?.username||null,accountType:me?.account_type||null};}
   catch(e){return {...base,status:e?.status||500,message:String(e?.message||e)};}
 }
 
+function normalizePins(data){
+  const items=(data?.items||[]).map(pin=>({
+    ...pin,
+    source:PRIMARY_SOURCE,
+    pinterest_data_source:PRIMARY_SOURCE
+  }));
+  return {...data,items,source:PRIMARY_SOURCE,pinterest_data_source:PRIMARY_SOURCE,fetched_at:new Date().toISOString()};
+}
+
+const AUTOMATION_ROUTES=new Map([
+  ['/pinterest/automation/me','/pinterest/me'],
+  ['/pinterest/automation/boards','/pinterest/boards'],
+  ['/pinterest/automation/pins','/pinterest/pins']
+]);
+
 const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,`http://${req.headers.host}`);
-    if(url.pathname==='/'){return json(res,200,{ok:true,service:'cashflowengine-pinterest-bridge',appConfigured:appConfigured(),tokenConfigured:tokenConfigured()});}
+    if(url.pathname==='/'){return json(res,200,{ok:true,service:'cashflowengine-pinterest-bridge',appConfigured:appConfigured(),tokenConfigured:tokenConfigured(),primary_source:PRIMARY_SOURCE});}
     if(url.pathname==='/health'){const h=await health();return json(res,h.ok?200:503,h);}
     if(url.pathname==='/oauth/start'){
       if(!appConfigured())return json(res,503,{error:'pinterest_app_credentials_not_configured'});
@@ -84,15 +103,32 @@ const server=http.createServer(async(req,res)=>{
       console.log('[PINTEREST_OAUTH_SUCCESS]',JSON.stringify({responseType:token?.response_type||null,expiresIn:token?.expires_in||null,refreshExpiresIn:token?.refresh_token_expires_in||null,scope:token?.scope||null}));
       return html(res,200,`<!doctype html><meta charset="utf-8"><title>Pinterest connected</title><style>body{font-family:sans-serif;max-width:700px;margin:60px auto;padding:20px;line-height:1.7}</style><h1>Pinterest authorization succeeded</h1><p>Authorization code exchange succeeded.</p><p>For security, tokens are not displayed in this browser.</p>`);
     }
+
+    if(url.pathname==='/pinterest/automation/health'&&req.method==='GET'){
+      if(!automationAuthOk(req,url))return json(res,401,{ok:false,error:'unauthorized'});
+      const h=await health();return json(res,h.ok?200:503,{...h,service:'pinterest-automation-gateway',automation_gateway_configured:Boolean(AUTOMATION_TOKEN&&BRIDGE_TOKEN)});
+    }
+
+    const mapped=AUTOMATION_ROUTES.get(url.pathname);
+    if(mapped){
+      if(!automationAuthOk(req,url))return json(res,401,{ok:false,error:'unauthorized'});
+      url.searchParams.delete('automation_token');
+      url.pathname=mapped;
+      req.headers.authorization=`Bearer ${BRIDGE_TOKEN}`;
+    }
+
     if(!url.pathname.startsWith('/pinterest/'))return json(res,404,{error:'not_found'});
     if(!authOk(req))return json(res,401,{error:'unauthorized'});
-    if(url.pathname==='/pinterest/me'&&req.method==='GET')return json(res,200,await pinterestRequest('/user_account'));
-    if(url.pathname==='/pinterest/boards'&&req.method==='GET')return json(res,200,await pinterestRequest('/boards',{query:{page_size:url.searchParams.get('page_size')||'25',bookmark:url.searchParams.get('bookmark')||''}}));
-    if(url.pathname==='/pinterest/pins'&&req.method==='GET')return json(res,200,await pinterestRequest('/pins',{query:{page_size:url.searchParams.get('page_size')||'25',bookmark:url.searchParams.get('bookmark')||''}}));
+    if(url.pathname==='/pinterest/me'&&req.method==='GET')return json(res,200,{...(await pinterestRequest('/user_account')),source:PRIMARY_SOURCE,pinterest_data_source:PRIMARY_SOURCE});
+    if(url.pathname==='/pinterest/boards'&&req.method==='GET')return json(res,200,{...(await pinterestRequest('/boards',{query:{page_size:url.searchParams.get('page_size')||'25',bookmark:url.searchParams.get('bookmark')||''}})),source:PRIMARY_SOURCE,pinterest_data_source:PRIMARY_SOURCE});
+    if(url.pathname==='/pinterest/pins'&&req.method==='GET'){
+      const data=await pinterestRequest('/pins',{query:{page_size:url.searchParams.get('page_size')||'25',bookmark:url.searchParams.get('bookmark')||'',pin_metrics:url.searchParams.get('pin_metrics')||'true'}});
+      return json(res,200,normalizePins(data));
+    }
     if(url.pathname==='/pinterest/pins'&&req.method==='POST'){
       const b=await readJsonBody(req);if(!b.board_id||!b.title||!b.media_source)return json(res,400,{error:'board_id_title_media_source_required'});
       const payload={board_id:b.board_id,title:b.title,description:b.description||'',link:b.link||undefined,alt_text:b.alt_text||undefined,media_source:b.media_source};
-      return json(res,201,await pinterestRequest('/pins',{method:'POST',body:payload}));
+      return json(res,201,{...(await pinterestRequest('/pins',{method:'POST',body:payload})),source:PRIMARY_SOURCE,pinterest_data_source:PRIMARY_SOURCE});
     }
     if(url.pathname==='/pinterest/refresh'&&req.method==='POST'){
       const data=await refreshToken();console.log('[PINTEREST_REFRESH_SUCCESS]',JSON.stringify({expiresIn:data?.expires_in||null,refreshExpiresIn:data?.refresh_token_expires_in||null,scope:data?.scope||null}));
@@ -102,4 +138,8 @@ const server=http.createServer(async(req,res)=>{
   }catch(e){const status=Number(e?.status||500);return json(res,status,{error:status===500?'internal_error':'upstream_error',status,message:String(e?.message||e),...(e?.details?{details:e.details}:{})});}
 });
 
-server.listen(PORT,'0.0.0.0',()=>console.log(`Cash Flow Engine Pinterest bridge listening on ${PORT}`));
+server.listen(PORT,'0.0.0.0',async()=>{
+  console.log(`Cash Flow Engine Pinterest bridge listening on ${PORT}`);
+  const h=await health();
+  console.log('[PINTEREST_HEALTH_TEST]',JSON.stringify({ok:h.ok,appConfigured:h.appConfigured,tokenConfigured:h.tokenConfigured,username:h.username||null,accountType:h.accountType||null,primarySource:h.primary_source,status:h.status||200,message:h.message||null}));
+});
