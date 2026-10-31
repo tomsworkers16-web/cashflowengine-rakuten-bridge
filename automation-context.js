@@ -11,7 +11,7 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;');
 }
 
-async function localJson(path, timeoutMs = 15000) {
+async function localJson(path, timeoutMs = 20000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -78,26 +78,39 @@ http.createServer = function automationContextCreateServer(listener) {
         res.writeHead(result.ok ? 200 : 503, {
           'Content-Type': 'application/json; charset=utf-8',
           'Cache-Control': 'no-store',
-          'Access-Control-Allow-Origin': '*'
+          'Access-Control-Allow-Origin': '*',
+          'X-Content-Type-Options': 'nosniff'
         });
         res.end(JSON.stringify(result));
         return;
       }
 
       if (url.pathname === '/automation/daily-context' && req.method === 'GET') {
-        const [health, plan, threadsHealth, threadsEvaluation, diagnostics] = await Promise.all([
+        const [health, plan, threadsHealth, threadsEvaluation, diagnostics, gatewayStatus] = await Promise.all([
           localJson('/health'),
           localJson('/daily-plan'),
           localJson('/threads/health'),
           localJson('/threads/evaluation-data?days=7'),
-          localJson('/diagnostics/daily-plan')
+          localJson('/diagnostics/daily-plan'),
+          localJson('/automation/gateway-status')
         ]);
 
         const candidates = Array.isArray(plan?.data?.candidates) ? plan.data.candidates : [];
         const affiliateUrlValidCount = candidates.filter(x => typeof x?.affiliateUrl === 'string' && /^https?:\/\//.test(x.affiliateUrl)).length;
+        const threadsDataSource = threadsEvaluation.data?.threads_data_source || threadsEvaluation.data?.source || null;
+        const insightFetchFailures = Number(threadsEvaluation.data?.insight_fetch_failures || 0);
+        const planOk = health.status === 200 && health.data?.ok === true && health.data?.configured === true &&
+          plan.status === 200 && plan.data?.ok === true && plan.data?.scoringVersion === 'expected-profit-v3' &&
+          candidates.length >= 20 && affiliateUrlValidCount >= 20;
+        const threadsOk = threadsHealth.status === 200 && threadsHealth.data?.configured === true &&
+          threadsEvaluation.status === 200 && threadsEvaluation.data?.ok === true &&
+          threadsDataSource === 'meta_official' && insightFetchFailures === 0;
+        const diagnosticsOk = diagnostics.status === 200 && diagnostics.data?.candidateGeneration === 'ok' &&
+          diagnostics.data?.expectedProfitEngine === 'ok';
+        const gatewayOk = gatewayStatus.status === 200 && gatewayStatus.data?.configured === true;
+
         const summary = {
-          ok: health.status === 200 && health.data?.ok === true && health.data?.configured === true &&
-              plan.status === 200 && plan.data?.ok === true && plan.data?.scoringVersion === 'expected-profit-v3' && candidates.length >= 20,
+          ok: planOk && threadsOk && diagnosticsOk && gatewayOk,
           generatedAt: new Date().toISOString(),
           healthStatus: health.status,
           configured: health.data?.configured === true,
@@ -110,18 +123,31 @@ http.createServer = function automationContextCreateServer(listener) {
           affiliateUrlValidCount,
           threadsHealthStatus: threadsHealth.status,
           threadsConfigured: threadsHealth.data?.configured === true,
-          threadsDataSource: threadsEvaluation.data?.threads_data_source || threadsEvaluation.data?.source || null,
+          threadsDataSource,
           threadsPostCount: threadsEvaluation.data?.post_count ?? null,
-          diagnosticsStatus: diagnostics.status
+          insightFetchFailures,
+          diagnosticsStatus: diagnostics.status,
+          candidateGeneration: diagnostics.data?.candidateGeneration || null,
+          expectedProfitEngine: diagnostics.data?.expectedProfitEngine || null,
+          rakutenApi: diagnostics.data?.rakutenApi || null,
+          lastError: diagnostics.data?.lastError || null,
+          automationGatewayConfigured: gatewayStatus.data?.configured === true,
+          planOk,
+          threadsOk,
+          diagnosticsOk,
+          gatewayOk
         };
 
-        const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cash Flow Engine Daily Context</title></head><body><main><h1>Cash Flow Engine Daily Context</h1><p>This page is an Automation-compatible read-only mirror of the canonical Cash Flow Engine bridge data. It contains no API keys or secrets.</p><section id="summary"><h2>Summary</h2><pre>${escapeHtml(JSON.stringify(summary, null, 2))}</pre></section>${section('Rakuten / Expected Profit Health','health',health)}${section('Expected Profit Daily Plan','daily-plan',plan)}${section('Daily Plan Diagnostics','diagnostics',diagnostics)}${section('Threads Health','threads-health',threadsHealth)}${section('Threads Evaluation 7 Days','threads-evaluation',threadsEvaluation)}</main></body></html>`;
+        const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cash Flow Engine Daily Context</title></head><body><main><h1>Cash Flow Engine Daily Context</h1><p>This page is an Automation-compatible read-only mirror of the canonical Cash Flow Engine bridge data. It contains no API keys or secrets.</p><section id="summary"><h2>Summary</h2><pre>${escapeHtml(JSON.stringify(summary, null, 2))}</pre></section>${section('Rakuten / Expected Profit Health','health',health)}${section('Expected Profit Daily Plan','daily-plan',plan)}${section('Daily Plan Diagnostics','diagnostics',diagnostics)}${section('Automation Gateway Status','automation-gateway',gatewayStatus)}${section('Threads Health','threads-health',threadsHealth)}${section('Threads Evaluation 7 Days','threads-evaluation',threadsEvaluation)}</main></body></html>`;
 
         res.writeHead(summary.ok ? 200 : 503, {
           'Content-Type': 'text/html; charset=utf-8',
           'Cache-Control': 'no-store',
+          'Pragma': 'no-cache',
           'Access-Control-Allow-Origin': '*',
-          'X-Robots-Tag': 'noindex, nofollow'
+          'X-Robots-Tag': 'noindex, nofollow',
+          'Referrer-Policy': 'no-referrer',
+          'X-Content-Type-Options': 'nosniff'
         });
         res.end(html);
         return;
