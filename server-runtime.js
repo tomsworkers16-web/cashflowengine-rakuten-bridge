@@ -9,9 +9,33 @@ let supabaseSyncRunning = false;
 
 const originalCreateServer = http.createServer.bind(http);
 http.createServer = function guardedCreateServer(listener) {
-  return originalCreateServer((req, res) => {
+  return originalCreateServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
+
+      const mirrorMap = {
+        '/_automation/health': '/health',
+        '/_automation/daily-plan': '/daily-plan',
+        '/_automation/daily-plan-diagnostics': '/diagnostics/daily-plan',
+        '/_automation/threads-health': '/threads/health'
+      };
+      if (req.method === 'GET' && (mirrorMap[url.pathname] || url.pathname === '/_automation/threads-evaluation')) {
+        let target = mirrorMap[url.pathname];
+        if (url.pathname === '/_automation/threads-evaluation') {
+          const days = Math.min(30, Math.max(1, Number(url.searchParams.get('days') || 7)));
+          target = `/threads/evaluation-data?days=${days}`;
+        }
+        const mirrored = await localGet(target);
+        res.writeHead(mirrored.status, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*',
+          'X-CFE-Mirror-Source': target
+        });
+        res.end(JSON.stringify(mirrored.data));
+        return;
+      }
+
       if (
         url.pathname === '/threads/evaluation-data' &&
         url.searchParams.get('simulate_meta_failure') === '1' &&
@@ -20,7 +44,13 @@ http.createServer = function guardedCreateServer(listener) {
         url.searchParams.delete('simulate_meta_failure');
         req.url = `${url.pathname}${url.search}`;
       }
-    } catch {}
+    } catch (e) {
+      if (!res.headersSent && req.url?.startsWith('/_automation/')) {
+        res.writeHead(500, { 'Content-Type':'text/plain; charset=utf-8', 'Cache-Control':'no-store' });
+        res.end(JSON.stringify({ ok:false, error:'automation_mirror_error', message:String(e?.message || e) }));
+        return;
+      }
+    }
     return listener(req, res);
   });
 };
