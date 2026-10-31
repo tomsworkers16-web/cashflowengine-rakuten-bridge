@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import { URL } from 'node:url';
+import { getSupabaseStatus, saveThreadsPredictionSnapshot, loadThreadsPredictionSnapshots } from './supabase-store.js';
 
 const PORT = Number(process.env.PORT || 10000);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || '';
@@ -9,6 +10,8 @@ const THREADS_ACCESS_TOKEN = process.env.THREADS_ACCESS_TOKEN || '';
 const THREADS_USER_ID = process.env.THREADS_USER_ID || '';
 const STATE_FILE = process.env.CFE_THREADS_STATE_FILE || '/tmp/cfe-threads-state.json';
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const INSIGHT_CONCURRENCY = 5;
+const MAX_BODY_BYTES = 64 * 1024;
 
 const runtimeState = {
   lastSuccessfulFetch: null,
@@ -131,6 +134,21 @@ function insightValue(rows, name) {
   return Number.isFinite(n) ? n : 0;
 }
 
+async function mapWithConcurrency(items, worker, limit = INSIGHT_CONCURRENCY) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function runner() {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      try { results[index] = { ok: true, value: await worker(items[index], index) }; }
+      catch (error) { results[index] = { ok: false, error }; }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, () => runner()));
+  return results;
+}
+
 async function accountInsights() {
   try {
     const data = await metaRequest('/me/threads_insights', {
@@ -168,20 +186,21 @@ async function getEvaluationData(days = 7, simulateFailure = false) {
   });
   const acct = await accountInsights();
 
-  const normalized = [];
-  for (const p of posts) {
-    let rows = [];
-    try {
-      const insight = await metaRequest(`/${encodeURIComponent(p.id)}/insights`, {
-        attempts: 2,
-        params: { metric: 'views,likes,replies,reposts,quotes,shares' }
-      });
-      rows = insight?.data || [];
-    } catch (e) {
-      rows = [];
-    }
+  const insightResults = await mapWithConcurrency(posts, async p => {
+    const insight = await metaRequest(`/${encodeURIComponent(p.id)}/insights`, {
+      attempts: 2,
+      params: { metric: 'views,likes,replies,reposts,quotes,shares' }
+    });
+    return insight?.data || [];
+  });
+
+  let insightFetchFailures = 0;
+  const normalized = posts.map((p, index) => {
+    const insightResult = insightResults[index];
+    const rows = insightResult?.ok ? insightResult.value : [];
+    if (!insightResult?.ok) insightFetchFailures += 1;
     const prediction = runtimeState.predictionSnapshots[p.id] || null;
-    normalized.push({
+    return {
       account: profile?.username || 'rakumitsu_select',
       post_id: p.id,
       post_timestamp: toJstIso(p.timestamp),
@@ -199,9 +218,10 @@ async function getEvaluationData(days = 7, simulateFailure = false) {
       source: 'meta_official',
       threads_data_source: 'meta_official',
       fetched_at: fetchedAt,
-      prediction_snapshot: prediction
-    });
-  }
+      prediction_snapshot: prediction,
+      insight_fetch_ok: Boolean(insightResult?.ok)
+    };
+  });
 
   runtimeState.lastSuccessfulFetch = fetchedAt;
   runtimeState.lastError = null;
@@ -220,6 +240,7 @@ async function getEvaluationData(days = 7, simulateFailure = false) {
     fallback_source: 'windsor',
     fetched_at: fetchedAt,
     account_metrics: acct,
+    insight_fetch_failures: insightFetchFailures,
     posts: normalized
   };
 }
@@ -256,9 +277,24 @@ function sanitizePrediction(input = {}) {
 
 async function readBody(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) {
+      const e = new Error('request_body_too_large');
+      e.status = 413;
+      throw e;
+    }
+    chunks.push(chunk);
+  }
   if (!chunks.length) return {};
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    const e = new Error('invalid_json');
+    e.status = 400;
+    throw e;
+  }
 }
 
 async function publishWithSnapshot(req, res) {
@@ -270,15 +306,28 @@ async function publishWithSnapshot(req, res) {
   const params = { media_type: 'TEXT', text, auto_publish_text: 'true' };
   const posted = await metaRequest('/me/threads', { method: 'POST', params, attempts: 2 });
   const id = posted?.id || null;
+  let snapshotSaved = false;
+  let snapshotPersisted = false;
   if (id && body?.prediction && !runtimeState.predictionSnapshots[id]) {
-    runtimeState.predictionSnapshots[id] = sanitizePrediction(body.prediction);
+    const snapshot = sanitizePrediction(body.prediction);
+    runtimeState.predictionSnapshots[id] = snapshot;
     persistState();
+    snapshotSaved = true;
+    if (getSupabaseStatus().configured) {
+      try {
+        await saveThreadsPredictionSnapshot(id, snapshot);
+        snapshotPersisted = true;
+      } catch (error) {
+        console.error('[THREADS_PREDICTION_PERSIST_ERROR]', JSON.stringify({ postId:id, error:String(error?.message || error) }));
+      }
+    }
   }
   return sendJson(res, 200, {
     ok: true,
     id,
     threads_data_source: 'meta_official',
-    prediction_snapshot_saved: Boolean(id && runtimeState.predictionSnapshots[id])
+    prediction_snapshot_saved: snapshotSaved,
+    prediction_snapshot_persisted: snapshotPersisted
   });
 }
 
@@ -363,6 +412,7 @@ http.createServer = function threadsGatewayCreateServer(listener) {
       }
 
       if (url.pathname === '/threads/fallback-audit' && req.method === 'GET') {
+        if (!authOk(req)) return sendJson(res, 401, { ok:false, error:'unauthorized' });
         return sendJson(res, 200, {
           ok: true,
           primary_source: 'meta_official',
@@ -372,6 +422,7 @@ http.createServer = function threadsGatewayCreateServer(listener) {
       }
 
       if (url.pathname === '/threads/prediction-snapshot' && req.method === 'GET') {
+        if (!authOk(req)) return sendJson(res, 401, { ok:false, error:'unauthorized' });
         const id = url.searchParams.get('post_id');
         if (!id) return sendJson(res, 400, { error: 'post_id_required' });
         return sendJson(res, 200, {
@@ -395,5 +446,17 @@ http.createServer = function threadsGatewayCreateServer(listener) {
     return listener(req, res);
   });
 };
+
+setTimeout(async () => {
+  if (!getSupabaseStatus().configured) return;
+  try {
+    const persisted = await loadThreadsPredictionSnapshots(200);
+    runtimeState.predictionSnapshots = { ...persisted, ...runtimeState.predictionSnapshots };
+    persistState();
+    console.log('[THREADS_PREDICTION_RESTORE]', JSON.stringify({ ok:true, count:Object.keys(persisted).length }));
+  } catch (error) {
+    console.error('[THREADS_PREDICTION_RESTORE]', JSON.stringify({ ok:false, error:String(error?.message || error) }));
+  }
+}, 1000);
 
 await import('./server-profit.js');
