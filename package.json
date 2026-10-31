@@ -6,7 +6,7 @@
   "scripts": {
     "prestart": "npm test",
     "start": "node automation-context.js",
-    "test": "node --check automation-context.js && node --check server-runtime.js && node --check server-automation-gateway.js && node --check server-threads-gateway.js && node --check server-profit.js && node --check server.js && node --check supabase-store.js"
+    "test": "node --check automation-context.js && node --check server-runtime.js && node --check server-automation-gateway.js && node --check server-threads-gateway.js && node --check server-profit.js && node --check server.js && node --check supabase-store.js && node --check server-demand.js && node --check daily-scan.js && node --check pinterest-bridge.js && node --check rakuten-funnel.js && node --check rakuten-report-normalize.js"
   },
   "engines": {
     "node": "26.x"
