@@ -2,6 +2,7 @@ import http from 'node:http';
 import { URL } from 'node:url';
 
 const PORT = Number(process.env.PORT || 10000);
+const AUTOMATION_TOKEN = process.env.CFE_AUTOMATION_TOKEN || '';
 
 // Production guard: the fallback simulation query is only honored while the explicit
 // startup test flag is enabled. In normal operation, external callers cannot inject
@@ -24,10 +25,20 @@ http.createServer = function guardedCreateServer(listener) {
   });
 };
 
-await import('./server-threads-gateway.js');
+await import('./server-automation-gateway.js');
 
 async function localGet(path) {
   const res = await fetch(`http://127.0.0.1:${PORT}${path}`);
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+
+async function localPost(path, body = {}) {
+  const res = await fetch(`http://127.0.0.1:${PORT}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
 }
@@ -74,6 +85,31 @@ setTimeout(async () => {
       lastSuccessfulFetch: health.data?.last_successful_fetch,
       lastError: health.data?.last_error || null
     }));
+
+    if (AUTOMATION_TOKEN) {
+      const token = encodeURIComponent(AUTOMATION_TOKEN);
+      const automationHealth = await localGet(`/threads/automation/health?automation_token=${token}`);
+      console.log('[THREADS_AUTOMATION_GATEWAY_TEST]', JSON.stringify({
+        status: automationHealth.status,
+        ok: automationHealth.data?.ok === true,
+        configured: automationHealth.data?.configured === true,
+        service: automationHealth.data?.service || null,
+        primarySource: automationHealth.data?.primary_source || null,
+        allowedRouteCount: Array.isArray(automationHealth.data?.allowed_routes) ? automationHealth.data.allowed_routes.length : 0
+      }));
+
+      // Safe write-path auth test: an empty post must reach the existing Threads
+      // publisher and fail validation with text_required. This proves Automation
+      // authentication/forwarding without publishing anything.
+      const postAuth = await localPost(`/threads/automation/post?automation_token=${token}`, {});
+      console.log('[THREADS_AUTOMATION_POST_AUTH_TEST]', JSON.stringify({
+        status: postAuth.status,
+        passedAuth: postAuth.status === 400 && postAuth.data?.error === 'text_required',
+        error: postAuth.data?.error || null
+      }));
+    } else {
+      console.log('[THREADS_AUTOMATION_GATEWAY_TEST]', JSON.stringify({ ok:false, configured:false, skipped:'CFE_AUTOMATION_TOKEN_missing' }));
+    }
 
     const seven = await localGet('/threads/evaluation-data?days=7');
     summarizeEvaluation('THREADS_EVALUATION_7D_TEST', seven);
