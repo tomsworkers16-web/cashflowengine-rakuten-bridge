@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { URL } from 'node:url';
+import { loadDailyPlanLkg } from './supabase-store.js';
 
 const PORT = Number(process.env.PORT || 10000);
 
@@ -44,6 +45,45 @@ http.createServer = function automationContextCreateServer(listener) {
   return nativeCreateServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
+
+      if (url.pathname === '/automation/lkg-self-test' && req.method === 'GET') {
+        const cached = await loadDailyPlanLkg();
+        const generatedMs = Date.parse(cached?.plan?.generatedAt || cached?.eventTime || 0);
+        const ageMs = Number.isFinite(generatedMs) ? Date.now() - generatedMs : Infinity;
+        const ageMinutes = Number.isFinite(ageMs) ? Math.max(0, Math.round(ageMs / 60000)) : null;
+        const candidates = Array.isArray(cached?.plan?.candidates) ? cached.plan.candidates : [];
+        const validAffiliateCount = candidates.filter(x => typeof x?.affiliateUrl === 'string' && /^https?:\/\//.test(x.affiliateUrl)).length;
+        const fresh = ageMinutes !== null && ageMinutes <= 1440;
+        const result = {
+          ok: Boolean(cached?.plan && fresh && candidates.length >= 20 && validAffiliateCount >= 20),
+          test: 'simulated_rakuten_timeout_to_persisted_lkg',
+          simulatedFailure: {
+            error: 'expected_profit_plan_unavailable',
+            reason: 'rakuten_api_timeout',
+            retryable: true
+          },
+          persistedLkg: {
+            found: Boolean(cached?.plan),
+            scoringVersion: cached?.plan?.scoringVersion || null,
+            generatedAt: cached?.plan?.generatedAt || cached?.eventTime || null,
+            ageMinutes,
+            freshWithin24h: fresh,
+            candidateCount: candidates.length,
+            affiliateUrlValidCount: validAffiliateCount
+          },
+          recoveryDecision: cached?.plan && fresh && candidates.length >= 20 && validAffiliateCount >= 20
+            ? 'serve_last_known_good_as_stale_degraded_candidate'
+            : 'return_structured_error_and_hold_revenue_post'
+        };
+        res.writeHead(result.ok ? 200 : 503, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify(result));
+        return;
+      }
+
       if (url.pathname === '/automation/daily-context' && req.method === 'GET') {
         const [health, plan, threadsHealth, threadsEvaluation, diagnostics] = await Promise.all([
           localJson('/health'),
@@ -87,9 +127,9 @@ http.createServer = function automationContextCreateServer(listener) {
         return;
       }
     } catch (error) {
-      if (req.url?.startsWith('/automation/daily-context')) {
+      if (req.url?.startsWith('/automation/')) {
         res.writeHead(500, { 'Content-Type':'text/html; charset=utf-8', 'Cache-Control':'no-store' });
-        res.end(`<!doctype html><html><body><h1>Cash Flow Engine Daily Context Error</h1><pre>${escapeHtml(JSON.stringify({ ok:false, error:'daily_context_failed', message:String(error?.message || error) }, null, 2))}</pre></body></html>`);
+        res.end(`<!doctype html><html><body><h1>Cash Flow Engine Automation Context Error</h1><pre>${escapeHtml(JSON.stringify({ ok:false, error:'automation_context_failed', message:String(error?.message || error) }, null, 2))}</pre></body></html>`);
         return;
       }
     }
