@@ -24,16 +24,26 @@ function confidence(score, row, post) {
 }
 
 function n(v) { return Number(v || 0) || 0; }
+function nullableNumber(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const x = Number(v);
+  return Number.isFinite(x) ? x : null;
+}
 
 function join(posts, reportRows, costs = {}) {
   const output = posts.map(post => {
     const ranked = reportRows.map(row => ({ row, ...scoreMatch(post, row) })).sort((a, b) => b.score - a.score);
     const best = ranked[0] || { row: {}, score: 0, reasons: [] };
     const row = best.row || {};
-    const commission = n(row.commission);
+    const attributed = best.score > 0;
+    const clicks = attributed ? nullableNumber(row.clicks) : null;
+    const orders = attributed ? nullableNumber(row.orders) : null;
+    const sales = attributed ? nullableNumber(row.sales) : null;
+    const commission = attributed ? nullableNumber(row.commission) : null;
     const tinyfishCost = n(costs.tinyfishDailyCost) / Math.max(posts.length, 1);
     const aiApiCost = n(post.aiApiCost || costs.aiApiCostPerPost);
-    const estimatedProfit = commission - tinyfishCost - aiApiCost;
+    const directCosts = tinyfishCost + aiApiCost;
+    const estimatedProfit = commission === null ? null : commission - directCosts;
     return {
       post_id: post.post_id || post.postId || null,
       postedAt: post.postedAt || null,
@@ -41,11 +51,13 @@ function join(posts, reportRows, costs = {}) {
       itemName: post.itemName || null,
       affiliateUrl: post.affiliateUrl || null,
       views: n(post.views), likes: n(post.likes), replies: n(post.replies), reposts: n(post.reposts), quotes: n(post.quotes), shares: n(post.shares),
-      affiliateClicks: row.clicks ?? null,
-      orders: row.orders ?? null,
-      sales: row.sales ?? null,
-      commission: row.commission ?? null,
+      affiliateClicks: clicks,
+      orders,
+      sales,
+      commission,
+      directCosts,
       estimatedProfit,
+      outcomeKnown: commission !== null,
       attribution: {
         confidence: confidence(best.score, row, post),
         score: best.score,
@@ -55,11 +67,24 @@ function join(posts, reportRows, costs = {}) {
     };
   });
 
+  const known = output.filter(x => x.outcomeKnown);
   const totals = output.reduce((a, x) => {
-    a.views += n(x.views); a.clicks += n(x.affiliateClicks); a.orders += n(x.orders); a.sales += n(x.sales); a.commission += n(x.commission); a.estimatedProfit += n(x.estimatedProfit); return a;
+    a.views += n(x.views);
+    if (x.affiliateClicks !== null) a.clicks += n(x.affiliateClicks);
+    if (x.orders !== null) a.orders += n(x.orders);
+    if (x.sales !== null) a.sales += n(x.sales);
+    if (x.commission !== null) a.commission += n(x.commission);
+    if (x.estimatedProfit !== null) a.estimatedProfit += n(x.estimatedProfit);
+    return a;
   }, { views: 0, clicks: 0, orders: 0, sales: 0, commission: 0, estimatedProfit: 0 });
-  totals.ctr = totals.views > 0 ? totals.clicks / totals.views : null;
+  totals.knownOutcomePosts = known.length;
+  totals.unknownOutcomePosts = output.length - known.length;
+  totals.ctr = totals.views > 0 && known.length > 0 ? totals.clicks / totals.views : null;
   totals.cvr = totals.clicks > 0 ? totals.orders / totals.clicks : null;
+  if (known.length === 0) {
+    totals.commission = null;
+    totals.estimatedProfit = null;
+  }
   return { generatedAt: new Date().toISOString(), totals, posts: output };
 }
 
