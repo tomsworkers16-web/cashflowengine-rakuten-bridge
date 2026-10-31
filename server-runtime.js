@@ -1,13 +1,11 @@
 import http from 'node:http';
 import { URL } from 'node:url';
-import { getSupabaseStatus, writeSystemEvent } from './supabase-store.js';
+import { getSupabaseStatus, writeSystemEvent, syncThreadsEvaluation } from './supabase-store.js';
 
 const PORT = Number(process.env.PORT || 10000);
 const AUTOMATION_TOKEN = process.env.CFE_AUTOMATION_TOKEN || '';
+let supabaseSyncRunning = false;
 
-// Production guard: the fallback simulation query is only honored while the explicit
-// startup test flag is enabled. In normal operation, external callers cannot inject
-// synthetic Meta failures into the fallback audit trail.
 const originalCreateServer = http.createServer.bind(http);
 http.createServer = function guardedCreateServer(listener) {
   return originalCreateServer((req, res) => {
@@ -71,6 +69,38 @@ function summarizeEvaluation(label, result) {
   }));
 }
 
+async function syncEvaluationResult(result, label) {
+  if (supabaseSyncRunning) return;
+  if (!getSupabaseStatus().configured || result?.status !== 200 || result?.data?.ok !== true) return;
+  supabaseSyncRunning = true;
+  try {
+    const sync = await syncThreadsEvaluation(result.data);
+    console.log(`[SUPABASE_THREADS_SYNC_${label}]`, JSON.stringify(sync));
+    if (!sync.ok) {
+      await writeSystemEvent({
+        component: 'threads-supabase-sync',
+        eventType: 'partial_sync_error',
+        severity: 'warning',
+        message: `Threads to Supabase sync completed with ${sync.errorCount} errors.`,
+        resolved: false,
+        metadata: sync
+      }).catch(() => {});
+    }
+  } catch (e) {
+    console.error(`[SUPABASE_THREADS_SYNC_${label}]`, JSON.stringify({ ok: false, error: String(e?.message || e) }));
+    await writeSystemEvent({
+      component: 'threads-supabase-sync',
+      eventType: 'sync_error',
+      severity: 'error',
+      message: String(e?.message || e),
+      resolved: false,
+      metadata: { label }
+    }).catch(() => {});
+  } finally {
+    supabaseSyncRunning = false;
+  }
+}
+
 setTimeout(async () => {
   try {
     const supabaseStatus = getSupabaseStatus();
@@ -85,10 +115,7 @@ setTimeout(async () => {
           message: 'Render bridge successfully wrote a startup test event to Supabase.',
           resolved: true,
           resolution: 'supabase_connection_verified',
-          metadata: {
-            source: 'server-runtime',
-            test: true
-          }
+          metadata: { source: 'server-runtime', test: true }
         });
         console.log('[SUPABASE_WRITE_TEST]', JSON.stringify({
           ok: true,
@@ -96,16 +123,10 @@ setTimeout(async () => {
           eventTime: row?.event_time ?? null
         }));
       } catch (e) {
-        console.error('[SUPABASE_WRITE_TEST]', JSON.stringify({
-          ok: false,
-          error: String(e?.message || e)
-        }));
+        console.error('[SUPABASE_WRITE_TEST]', JSON.stringify({ ok: false, error: String(e?.message || e) }));
       }
     } else {
-      console.log('[SUPABASE_WRITE_TEST]', JSON.stringify({
-        ok: false,
-        skipped: 'supabase_environment_missing'
-      }));
+      console.log('[SUPABASE_WRITE_TEST]', JSON.stringify({ ok: false, skipped: 'supabase_environment_missing' }));
     }
 
     const health = await localGet('/threads/health');
@@ -134,9 +155,6 @@ setTimeout(async () => {
         allowedRouteCount: Array.isArray(automationHealth.data?.allowed_routes) ? automationHealth.data.allowed_routes.length : 0
       }));
 
-      // Safe write-path auth test: an empty post must reach the existing Threads
-      // publisher and fail validation with text_required. This proves Automation
-      // authentication/forwarding without publishing anything.
       const postAuth = await localPost(`/threads/automation/post?automation_token=${token}`, {});
       console.log('[THREADS_AUTOMATION_POST_AUTH_TEST]', JSON.stringify({
         status: postAuth.status,
@@ -149,6 +167,7 @@ setTimeout(async () => {
 
     const seven = await localGet('/threads/evaluation-data?days=7');
     summarizeEvaluation('THREADS_EVALUATION_7D_TEST', seven);
+    await syncEvaluationResult(seven, 'STARTUP_7D');
 
     const today = await localGet('/threads/evaluation-data?days=1');
     summarizeEvaluation('THREADS_EVALUATION_TODAY_TEST', today);
@@ -163,3 +182,12 @@ setTimeout(async () => {
     console.error('[THREADS_GATEWAY_STARTUP_TEST_ERROR]', String(e?.message || e));
   }
 }, 2500);
+
+setInterval(async () => {
+  try {
+    const evaluation = await localGet('/threads/evaluation-data?days=7');
+    await syncEvaluationResult(evaluation, 'HOURLY_7D');
+  } catch (e) {
+    console.error('[SUPABASE_THREADS_SYNC_INTERVAL]', JSON.stringify({ ok: false, error: String(e?.message || e) }));
+  }
+}, 60 * 60 * 1000);
