@@ -1,4 +1,28 @@
+import http from 'node:http';
+import { URL } from 'node:url';
+
 const PORT = Number(process.env.PORT || 10000);
+
+// Production guard: the fallback simulation query is only honored while the explicit
+// startup test flag is enabled. In normal operation, external callers cannot inject
+// synthetic Meta failures into the fallback audit trail.
+const originalCreateServer = http.createServer.bind(http);
+http.createServer = function guardedCreateServer(listener) {
+  return originalCreateServer((req, res) => {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
+      if (
+        url.pathname === '/threads/evaluation-data' &&
+        url.searchParams.get('simulate_meta_failure') === '1' &&
+        process.env.CFE_FALLBACK_TEST_ON_START !== '1'
+      ) {
+        url.searchParams.delete('simulate_meta_failure');
+        req.url = `${url.pathname}${url.search}`;
+      }
+    } catch {}
+    return listener(req, res);
+  });
+};
 
 await import('./server-threads-gateway.js');
 
