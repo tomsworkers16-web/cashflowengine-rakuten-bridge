@@ -1,19 +1,18 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 
-const PORT = process.env.PORT || 10000;
-
-const RAKUTEN_APPLICATION_ID = process.env.RAKUTEN_APPLICATION_ID;
-const RAKUTEN_ACCESS_KEY = process.env.RAKUTEN_ACCESS_KEY;
-const RAKUTEN_AFFILIATE_ID = process.env.RAKUTEN_AFFILIATE_ID;
-const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN;
-
+const PORT = Number(process.env.PORT || 10000);
+const RAKUTEN_APPLICATION_ID = process.env.RAKUTEN_APPLICATION_ID || '';
+const RAKUTEN_ACCESS_KEY = process.env.RAKUTEN_ACCESS_KEY || '';
+const RAKUTEN_AFFILIATE_ID = process.env.RAKUTEN_AFFILIATE_ID || '';
+const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || '';
 const THREADS_API_BASE = process.env.THREADS_API_BASE || 'https://graph.threads.net/v1.0';
-const THREADS_ACCESS_TOKEN = process.env.THREADS_ACCESS_TOKEN;
-const THREADS_USER_ID = process.env.THREADS_USER_ID;
-const THREADS_SMOKE_THREAD_ID = process.env.THREADS_SMOKE_THREAD_ID;
-
+const THREADS_ACCESS_TOKEN = process.env.THREADS_ACCESS_TOKEN || '';
+const THREADS_USER_ID = process.env.THREADS_USER_ID || '';
+const THREADS_SMOKE_THREAD_ID = process.env.THREADS_SMOKE_THREAD_ID || '';
 const API_BASE = 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
+const UPSTREAM_TIMEOUT_MS = 8000;
+const MAX_BODY_BYTES = 64 * 1024;
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -97,8 +96,7 @@ function privacyPage() {
 }
 
 function authOk(req) {
-  if (!BRIDGE_TOKEN) return false;
-  return (req.headers.authorization || '') === `Bearer ${BRIDGE_TOKEN}`;
+  return Boolean(BRIDGE_TOKEN) && (req.headers.authorization || '') === `Bearer ${BRIDGE_TOKEN}`;
 }
 
 function configured() {
@@ -109,9 +107,22 @@ function threadsConfigured() {
   return Boolean(THREADS_ACCESS_TOKEN && THREADS_USER_ID && BRIDGE_TOKEN);
 }
 
+async function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function readJsonBody(req) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) {
+      const e = new Error('request_body_too_large');
+      e.status = 413;
+      throw e;
+    }
+    chunks.push(chunk);
+  }
   if (!chunks.length) return {};
   const raw = Buffer.concat(chunks).toString('utf8');
   if (!raw.trim()) return {};
@@ -119,15 +130,58 @@ async function readJsonBody(req) {
   catch { const e = new Error('invalid_json'); e.status = 400; throw e; }
 }
 
+async function fetchJsonWithRetry(url, { method = 'GET', attempts = 2, timeoutMs = UPSTREAM_TIMEOUT_MS } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { method, signal: controller.signal });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(`upstream_${response.status}`);
+        error.status = response.status;
+        error.details = data;
+        throw error;
+      }
+      return data;
+    } catch (error) {
+      lastError = error;
+      const status = Number(error?.status || 0);
+      const retryable = error?.name === 'AbortError' || status === 429 || status >= 500 || status === 0;
+      if (!retryable || attempt >= attempts) break;
+      await sleep(attempt * 350);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (lastError?.name === 'AbortError') {
+    const error = new Error('upstream_timeout');
+    error.status = 504;
+    throw error;
+  }
+  throw lastError || new Error('upstream_error');
+}
+
 async function threadsRequest(path, { method = 'GET', params = {} } = {}) {
-  if (!THREADS_ACCESS_TOKEN) { const e = new Error('threads_access_token_not_configured'); e.status = 503; throw e; }
+  if (!THREADS_ACCESS_TOKEN) {
+    const e = new Error('threads_access_token_not_configured');
+    e.status = 503;
+    throw e;
+  }
   const url = new URL(`${THREADS_API_BASE}${path}`);
-  for (const [k,v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+  }
   url.searchParams.set('access_token', THREADS_ACCESS_TOKEN);
-  const upstream = await fetch(url, { method });
-  const data = await upstream.json().catch(() => ({}));
-  if (!upstream.ok) { const e = new Error(`Threads API error ${upstream.status}`); e.status = upstream.status; e.details = data; throw e; }
-  return data;
+  try {
+    return await fetchJsonWithRetry(url, { method, attempts: 2 });
+  } catch (error) {
+    if (String(error?.message || '').startsWith('upstream_') && Number(error?.status || 0)) {
+      error.message = `Threads API error ${error.status}`;
+    }
+    throw error;
+  }
 }
 
 async function threadsSelftest() {
@@ -136,7 +190,7 @@ async function threadsSelftest() {
     const me = await threadsRequest('/me', { params:{ fields:'id,username,name,threads_profile_picture_url,threads_biography' } });
     return { ok:true, configured:true, userId:me?.id || THREADS_USER_ID, username:me?.username || null };
   } catch (error) {
-    return { ok:false, configured:true, status:error?.status || 500, message:String(error?.message || error), details:error?.details || null };
+    return { ok:false, configured:true, status:error?.status || 500, message:String(error?.message || error) };
   }
 }
 
@@ -152,73 +206,183 @@ async function threadsReadSmokeTest(threadId) {
 async function publishThreadsText(text, replyToId = null) {
   if (!text || typeof text !== 'string') { const e = new Error('text_required'); e.status=400; throw e; }
   if (text.length > 500) { const e = new Error('text_too_long'); e.status=400; throw e; }
-  const params={media_type:'TEXT',text,auto_publish_text:'true'};
-  if (replyToId) params.reply_to_id=replyToId;
-  const r=await threadsRequest('/me/threads',{method:'POST',params});
-  return {ok:true,id:r?.id||null,replyToId:replyToId||null};
+  const params = { media_type:'TEXT', text, auto_publish_text:'true' };
+  if (replyToId) params.reply_to_id = replyToId;
+  const r = await threadsRequest('/me/threads', { method:'POST', params });
+  return { ok:true, id:r?.id || null, replyToId:replyToId || null };
 }
 
 function normalizeItem(entry) {
-  const item=entry?.Item||entry?.item||entry||{};
-  const imageList=item.mediumImageUrls||item.smallImageUrls||[];
-  const firstImage=imageList[0];
+  const item = entry?.Item || entry?.item || entry || {};
+  const imageList = item.mediumImageUrls || item.smallImageUrls || [];
+  const firstImage = imageList[0];
   return {
-    itemName:item.itemName||null,itemPrice:Number(item.itemPrice||0)||null,itemUrl:item.itemUrl||null,affiliateUrl:item.affiliateUrl||null,
-    imageUrl:typeof firstImage==='string'?firstImage:firstImage?.imageUrl||null,reviewCount:Number(item.reviewCount||0),reviewAverage:Number(item.reviewAverage||0),
-    shopName:item.shopName||null,shopCode:item.shopCode||null,itemCode:item.itemCode||null,genreId:item.genreId||null,pointRate:Number(item.pointRate||0),
-    postageFlag:item.postageFlag??null,availability:item.availability??null
+    itemName:item.itemName || null,
+    itemPrice:Number(item.itemPrice || 0) || null,
+    itemUrl:item.itemUrl || null,
+    affiliateUrl:item.affiliateUrl || null,
+    imageUrl:typeof firstImage === 'string' ? firstImage : firstImage?.imageUrl || null,
+    reviewCount:Number(item.reviewCount || 0),
+    reviewAverage:Number(item.reviewAverage || 0),
+    shopName:item.shopName || null,
+    shopCode:item.shopCode || null,
+    itemCode:item.itemCode || null,
+    genreId:item.genreId || null,
+    pointRate:Number(item.pointRate || 0),
+    postageFlag:item.postageFlag ?? null,
+    availability:item.availability ?? null
   };
 }
 
 function scoreItem(item) {
-  let score=0; const reasons=[];
-  if(item.reviewAverage>=4.5){score+=28;reasons.push('高評価4.5+')}else if(item.reviewAverage>=4.2){score+=22;reasons.push('高評価4.2+')}else if(item.reviewAverage>=4.0){score+=16;reasons.push('評価4.0+')}
-  if(item.reviewCount>=2000){score+=28;reasons.push('レビュー2000+')}else if(item.reviewCount>=500){score+=22;reasons.push('レビュー500+')}else if(item.reviewCount>=100){score+=15;reasons.push('レビュー100+')}else if(item.reviewCount>=20){score+=8;reasons.push('レビュー20+')}
-  const price=Number(item.itemPrice||0); if(price>=1000&&price<=5000){score+=20;reasons.push('衝動買いしやすい価格帯')}else if(price>5000&&price<=10000){score+=13;reasons.push('中価格帯')}else if(price>0&&price<1000){score+=10;reasons.push('低価格')}
-  if(item.postageFlag===0||item.postageFlag==='0'){score+=12;reasons.push('送料無料')} if(item.pointRate>=5){score+=7;reasons.push('ポイント倍率高め')} if(item.affiliateUrl){score+=5;reasons.push('アフィリエイトURL取得済み')}
-  return {score:Math.min(score,100),reasons};
+  let score = 0;
+  const reasons = [];
+  if(item.reviewAverage>=4.5){score+=28;reasons.push('高評価4.5+');}
+  else if(item.reviewAverage>=4.2){score+=22;reasons.push('高評価4.2+');}
+  else if(item.reviewAverage>=4.0){score+=16;reasons.push('評価4.0+');}
+  if(item.reviewCount>=2000){score+=28;reasons.push('レビュー2000+');}
+  else if(item.reviewCount>=500){score+=22;reasons.push('レビュー500+');}
+  else if(item.reviewCount>=100){score+=15;reasons.push('レビュー100+');}
+  else if(item.reviewCount>=20){score+=8;reasons.push('レビュー20+');}
+  const price=Number(item.itemPrice||0);
+  if(price>=1000&&price<=5000){score+=20;reasons.push('衝動買いしやすい価格帯');}
+  else if(price>5000&&price<=10000){score+=13;reasons.push('中価格帯');}
+  else if(price>0&&price<1000){score+=10;reasons.push('低価格');}
+  if(item.postageFlag===0||item.postageFlag==='0'){score+=12;reasons.push('送料無料');}
+  if(item.pointRate>=5){score+=7;reasons.push('ポイント倍率高め');}
+  if(item.affiliateUrl){score+=5;reasons.push('アフィリエイトURL取得済み');}
+  return { score:Math.min(score,100), reasons };
 }
 
-async function searchRakuten({keyword,hits=10,sort='-reviewCount',minPrice,maxPrice,genreId}) {
-  const params=new URLSearchParams({applicationId:RAKUTEN_APPLICATION_ID,accessKey:RAKUTEN_ACCESS_KEY,affiliateId:RAKUTEN_AFFILIATE_ID,keyword,format:'json',hits:String(Math.min(Math.max(Number(hits||10),1),30)),sort,availability:'1'});
-  if(minPrice)params.set('minPrice',String(minPrice)); if(maxPrice)params.set('maxPrice',String(maxPrice)); if(genreId)params.set('genreId',String(genreId));
-  const upstream=await fetch(`${API_BASE}?${params.toString()}`); const data=await upstream.json().catch(()=>({}));
-  if(!upstream.ok){const e=new Error(`Rakuten API error ${upstream.status}`);e.status=upstream.status;e.details=data;throw e;}
-  const rawItems=data.Items||data.items||[]; return {meta:{page:data.page,pageCount:data.pageCount,hits:data.hits,count:data.count},items:rawItems.map(normalizeItem)};
+async function searchRakuten({ keyword, hits=10, sort='-reviewCount', minPrice, maxPrice, genreId }) {
+  const params = new URLSearchParams({
+    applicationId:RAKUTEN_APPLICATION_ID,
+    accessKey:RAKUTEN_ACCESS_KEY,
+    affiliateId:RAKUTEN_AFFILIATE_ID,
+    keyword,
+    format:'json',
+    hits:String(Math.min(Math.max(Number(hits || 10), 1), 30)),
+    sort,
+    availability:'1'
+  });
+  if (minPrice) params.set('minPrice', String(minPrice));
+  if (maxPrice) params.set('maxPrice', String(maxPrice));
+  if (genreId) params.set('genreId', String(genreId));
+  const data = await fetchJsonWithRetry(`${API_BASE}?${params.toString()}`, { attempts:2 });
+  const rawItems = data.Items || data.items || [];
+  return {
+    meta:{ page:data.page, pageCount:data.pageCount, hits:data.hits, count:data.count },
+    items:rawItems.map(normalizeItem)
+  };
 }
 
-const server=http.createServer(async(req,res)=>{
-  try{
-    const url=new URL(req.url,`http://${req.headers.host}`);
-    if(url.pathname==='/pinterest') return html(res,200,pinterestInfoPage());
-    if(url.pathname==='/privacy') return html(res,200,privacyPage());
-    if(url.pathname==='/health') return json(res,200,{ok:true,service:'cashflowengine-rakuten-bridge',configured:configured(),apiVersion:'20260701',threads:{configured:threadsConfigured(),apiBase:THREADS_API_BASE}});
-    if(url.pathname==='/threads/health'){const r=await threadsSelftest();return json(res,r.ok?200:(r.configured?502:503),r);}
-    if(url.pathname.startsWith('/threads/')){
-      if(!authOk(req))return json(res,401,{error:'unauthorized'}); if(!threadsConfigured())return json(res,503,{error:'threads_credentials_not_configured'});
-      if(url.pathname==='/threads/me'&&req.method==='GET')return json(res,200,await threadsRequest('/me',{params:{fields:url.searchParams.get('fields')||'id,username,name,threads_profile_picture_url,threads_biography'}}));
-      if(url.pathname==='/threads/replies'&&req.method==='GET'){const id=url.searchParams.get('thread_id');if(!id)return json(res,400,{error:'thread_id_required'});return json(res,200,await threadsRequest(`/${encodeURIComponent(id)}/replies`,{params:{fields:url.searchParams.get('fields')||'id,text,timestamp,username,permalink',reverse:url.searchParams.get('reverse')||'false'}}));}
-      if(url.pathname==='/threads/conversation'&&req.method==='GET'){const id=url.searchParams.get('thread_id');if(!id)return json(res,400,{error:'thread_id_required'});return json(res,200,await threadsRequest(`/${encodeURIComponent(id)}/conversation`,{params:{fields:url.searchParams.get('fields')||'id,text,timestamp,username,permalink',reverse:url.searchParams.get('reverse')||'false'}}));}
-      if(url.pathname==='/threads/insights'&&req.method==='GET'){const id=url.searchParams.get('thread_id');if(!id)return json(res,400,{error:'thread_id_required'});return json(res,200,await threadsRequest(`/${encodeURIComponent(id)}/insights`,{params:{metric:url.searchParams.get('metric')||'views,likes,replies,reposts,quotes,shares'}}));}
-      if(url.pathname==='/threads/post'&&req.method==='POST'){const body=await readJsonBody(req);return json(res,200,await publishThreadsText(body.text));}
-      if(url.pathname==='/threads/reply'&&req.method==='POST'){const body=await readJsonBody(req);if(!body.replyToId)return json(res,400,{error:'replyToId_required'});return json(res,200,await publishThreadsText(body.text,body.replyToId));}
-      return json(res,404,{error:'threads_route_not_found'});
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || `127.0.0.1:${PORT}`}`);
+    if (url.pathname === '/pinterest') return html(res, 200, pinterestInfoPage());
+    if (url.pathname === '/privacy') return html(res, 200, privacyPage());
+
+    // These compatibility health routes are normally intercepted by the newer
+    // gateway layers. They remain here only as a safe fallback.
+    if (url.pathname === '/health') {
+      return json(res, 200, {
+        ok:true,
+        service:'cashflowengine-rakuten-bridge',
+        configured:configured(),
+        apiVersion:'20260701',
+        threads:{ configured:threadsConfigured(), apiBase:THREADS_API_BASE }
+      });
     }
-    if(!['/search','/recommend'].includes(url.pathname))return json(res,404,{error:'not_found'}); if(!authOk(req))return json(res,401,{error:'unauthorized'}); if(!configured())return json(res,503,{error:'rakuten_credentials_not_configured'});
-    const keyword=(url.searchParams.get('keyword')||'').trim(); if(!keyword)return json(res,400,{error:'keyword_required'});
-    const result=await searchRakuten({keyword,hits:url.searchParams.get('hits')||(url.pathname==='/recommend'?30:10),sort:url.searchParams.get('sort')||'-reviewCount',minPrice:url.searchParams.get('minPrice'),maxPrice:url.searchParams.get('maxPrice'),genreId:url.searchParams.get('genreId')});
-    if(url.pathname==='/recommend'){const ranked=result.items.map(item=>({...item,...scoreItem(item)})).sort((a,b)=>b.score-a.score);return json(res,200,{keyword,count:ranked.length,scoringVersion:'rakumitsu-v1',items:ranked});}
-    return json(res,200,{keyword,count:result.items.length,...result.meta,items:result.items});
-  }catch(error){const status=Number(error?.status||500);return json(res,status,{error:status===500?'internal_error':(String(error?.message||'').startsWith('Threads API')?'threads_api_error':'upstream_error'),status,message:String(error?.message||error),...(error?.details?{details:error.details}:{})});}
+    if (url.pathname === '/threads/health') {
+      const r = await threadsSelftest();
+      return json(res, r.ok ? 200 : (r.configured ? 502 : 503), r);
+    }
+
+    if (url.pathname.startsWith('/threads/')) {
+      if (!authOk(req)) return json(res, 401, { error:'unauthorized' });
+      if (!threadsConfigured()) return json(res, 503, { error:'threads_credentials_not_configured' });
+      if (url.pathname === '/threads/me' && req.method === 'GET') {
+        return json(res, 200, await threadsRequest('/me', { params:{ fields:url.searchParams.get('fields') || 'id,username,name,threads_profile_picture_url,threads_biography' } }));
+      }
+      if (url.pathname === '/threads/replies' && req.method === 'GET') {
+        const id = url.searchParams.get('thread_id');
+        if (!id) return json(res, 400, { error:'thread_id_required' });
+        return json(res, 200, await threadsRequest(`/${encodeURIComponent(id)}/replies`, { params:{ fields:url.searchParams.get('fields') || 'id,text,timestamp,username,permalink', reverse:url.searchParams.get('reverse') || 'false' } }));
+      }
+      if (url.pathname === '/threads/conversation' && req.method === 'GET') {
+        const id = url.searchParams.get('thread_id');
+        if (!id) return json(res, 400, { error:'thread_id_required' });
+        return json(res, 200, await threadsRequest(`/${encodeURIComponent(id)}/conversation`, { params:{ fields:url.searchParams.get('fields') || 'id,text,timestamp,username,permalink', reverse:url.searchParams.get('reverse') || 'false' } }));
+      }
+      if (url.pathname === '/threads/insights' && req.method === 'GET') {
+        const id = url.searchParams.get('thread_id');
+        if (!id) return json(res, 400, { error:'thread_id_required' });
+        return json(res, 200, await threadsRequest(`/${encodeURIComponent(id)}/insights`, { params:{ metric:url.searchParams.get('metric') || 'views,likes,replies,reposts,quotes,shares' } }));
+      }
+      if (url.pathname === '/threads/post' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        return json(res, 200, await publishThreadsText(body.text));
+      }
+      if (url.pathname === '/threads/reply' && req.method === 'POST') {
+        const body = await readJsonBody(req);
+        if (!body.replyToId) return json(res, 400, { error:'replyToId_required' });
+        return json(res, 200, await publishThreadsText(body.text, body.replyToId));
+      }
+      return json(res, 404, { error:'threads_route_not_found' });
+    }
+
+    if (!['/search','/recommend'].includes(url.pathname)) return json(res, 404, { error:'not_found' });
+    if (!authOk(req)) return json(res, 401, { error:'unauthorized' });
+    if (!configured()) return json(res, 503, { error:'rakuten_credentials_not_configured' });
+    const keyword = (url.searchParams.get('keyword') || '').trim();
+    if (!keyword) return json(res, 400, { error:'keyword_required' });
+    const result = await searchRakuten({
+      keyword,
+      hits:url.searchParams.get('hits') || (url.pathname === '/recommend' ? 30 : 10),
+      sort:url.searchParams.get('sort') || '-reviewCount',
+      minPrice:url.searchParams.get('minPrice'),
+      maxPrice:url.searchParams.get('maxPrice'),
+      genreId:url.searchParams.get('genreId')
+    });
+    if (url.pathname === '/recommend') {
+      const ranked = result.items.map(item => ({ ...item, ...scoreItem(item) })).sort((a,b) => b.score - a.score);
+      return json(res, 200, { keyword, count:ranked.length, scoringVersion:'rakumitsu-v1', items:ranked });
+    }
+    return json(res, 200, { keyword, count:result.items.length, ...result.meta, items:result.items });
+  } catch (error) {
+    const status = Number(error?.status || 500);
+    return json(res, status, {
+      error: status === 500 ? 'internal_error' : (String(error?.message || '').startsWith('Threads API') ? 'threads_api_error' : 'upstream_error'),
+      status,
+      message:String(error?.message || error)
+    });
+  }
 });
 
-async function runStartupJobs(){
-  if(!configured())console.log('[SELFTEST] skipped: Rakuten credentials not fully configured');
-  else{
-    try{const result=await searchRakuten({keyword:'キッチン 便利グッズ',hits:1,sort:'-reviewCount'});const first=result.items[0];console.log('[SELFTEST]',JSON.stringify({ok:Boolean(first),itemReturned:Boolean(first),hasAffiliateUrl:Boolean(first?.affiliateUrl),itemName:first?.itemName||null,reviewCount:first?.reviewCount||0,reviewAverage:first?.reviewAverage||0}));}catch(error){console.error('[SELFTEST]',JSON.stringify({ok:false,status:error?.status||null,message:String(error?.message||error),details:error?.details||null}));}
+async function runLegacyStartupJobs() {
+  if (process.env.CFE_LEGACY_SELFTEST_ON_START !== '1') {
+    console.log('[LEGACY_STARTUP_SELFTEST] skipped');
+    return;
   }
-  const threadsTest=await threadsSelftest(); console.log('[THREADS_SELFTEST]',JSON.stringify(threadsTest));
-  if(threadsTest.ok&&THREADS_SMOKE_THREAD_ID){const readSmoke=await threadsReadSmokeTest(THREADS_SMOKE_THREAD_ID);console.log('[THREADS_READ_SMOKE]',JSON.stringify(readSmoke));}
+  if (!configured()) console.log('[SELFTEST] skipped: Rakuten credentials not fully configured');
+  else {
+    try {
+      const result = await searchRakuten({ keyword:'キッチン 便利グッズ', hits:1, sort:'-reviewCount' });
+      const first = result.items[0];
+      console.log('[SELFTEST]', JSON.stringify({ ok:Boolean(first), itemReturned:Boolean(first), hasAffiliateUrl:Boolean(first?.affiliateUrl), itemName:first?.itemName || null, reviewCount:first?.reviewCount || 0, reviewAverage:first?.reviewAverage || 0 }));
+    } catch (error) {
+      console.error('[SELFTEST]', JSON.stringify({ ok:false, status:error?.status || null, message:String(error?.message || error) }));
+    }
+  }
+  const threadsTest = await threadsSelftest();
+  console.log('[THREADS_SELFTEST]', JSON.stringify(threadsTest));
+  if (threadsTest.ok && THREADS_SMOKE_THREAD_ID) {
+    const readSmoke = await threadsReadSmokeTest(THREADS_SMOKE_THREAD_ID);
+    console.log('[THREADS_READ_SMOKE]', JSON.stringify(readSmoke));
+  }
 }
 
-server.listen(PORT,'0.0.0.0',()=>{console.log(`Cash Flow Engine bridge listening on ${PORT}`);setTimeout(runStartupJobs,1500);});
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Cash Flow Engine bridge listening on ${PORT}`);
+  setTimeout(runLegacyStartupJobs, 1500);
+});
