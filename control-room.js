@@ -50,13 +50,15 @@ async function sb(path, options = {}) {
 }
 
 function normalizePolicy(policy = {}, source = 'unknown', eventTime = null) {
-  const systemMode = SYSTEM_MODES.includes(policy.systemMode) ? policy.systemMode : 'NORMAL';
+  const legacyHold = policy.systemMode === 'HOLD';
+  const systemMode = legacyHold ? 'CAUTION' : (SYSTEM_MODES.includes(policy.systemMode) ? policy.systemMode : 'NORMAL');
   const fullHold = systemMode === 'FULL_HOLD';
   const revenueHold = systemMode === 'REVENUE_HOLD';
-  const postingEnabled = fullHold ? false : policy.postingEnabled !== false;
-  const revenuePostingEnabled = (fullHold || revenueHold) ? false : policy.revenuePostingEnabled !== false;
-  const organicPostingEnabled = fullHold ? false : policy.organicPostingEnabled !== false;
-  const maxPostsPerDay = Math.max(0, Math.min(20, Number(policy.maxPostsPerDay ?? 5)));
+  const postingEnabled = fullHold ? false : (legacyHold ? true : policy.postingEnabled !== false);
+  const revenuePostingEnabled = (fullHold || revenueHold) ? false : (legacyHold ? true : policy.revenuePostingEnabled !== false);
+  const organicPostingEnabled = fullHold ? false : true;
+  const rawMax = legacyHold ? Math.max(1, Number(policy.maxPostsPerDay || 0)) : Number(policy.maxPostsPerDay ?? 5);
+  const maxPostsPerDay = Math.max(0, Math.min(20, rawMax));
   const minExperimentsPerDay = fullHold ? 0 : Math.max(1, Math.min(20, Number(policy.minExperimentsPerDay ?? 1)));
   return {
     source, eventTime, systemMode, postingEnabled, revenuePostingEnabled, organicPostingEnabled,
@@ -66,7 +68,7 @@ function normalizePolicy(policy = {}, source = 'unknown', eventTime = null) {
     maxPostsPerDay,
     minExperimentsPerDay,
     priorityThemes: Array.isArray(policy.priorityThemes) ? policy.priorityThemes.map(String).slice(0,10) : [],
-    holdReasons: Array.isArray(policy.holdReasons) ? policy.holdReasons.map(String).slice(0,10) : [],
+    holdReasons: legacyHold ? ['legacy_hold_migrated_to_caution', ...(Array.isArray(policy.holdReasons) ? policy.holdReasons.map(String).slice(0,9) : [])] : (Array.isArray(policy.holdReasons) ? policy.holdReasons.map(String).slice(0,10) : []),
     notes: String(policy.notes || '').slice(0,1000),
     issuedAt: policy.issuedAt || null
   };
@@ -109,6 +111,52 @@ async function localJson(path, timeoutMs=22000) {
   finally{clearTimeout(timer)}
 }
 
+async function buildSystemContext() {
+  const [health, plan, threadsHealth, threadsEvaluation, diagnostics, gateway] = await Promise.all([
+    localJson('/health'),
+    localJson('/daily-plan'),
+    localJson('/threads/health'),
+    localJson('/threads/evaluation-data?days=7'),
+    localJson('/diagnostics/daily-plan'),
+    localJson('/automation/gateway-status')
+  ]);
+  const candidates = Array.isArray(plan.data?.candidates) ? plan.data.candidates : [];
+  const affiliateUrlValidCount = candidates.filter(x => typeof x?.affiliateUrl === 'string' && /^https?:\/\//.test(x.affiliateUrl)).length;
+  const threadsDataSource = threadsEvaluation.data?.threads_data_source || threadsEvaluation.data?.source || null;
+  const insightFetchFailures = Number(threadsEvaluation.data?.insight_fetch_failures || 0);
+  const planOk = health.status === 200 && health.data?.ok === true && health.data?.configured === true && plan.status === 200 && plan.data?.ok === true && plan.data?.scoringVersion === 'expected-profit-v3' && candidates.length >= 20 && affiliateUrlValidCount >= 20;
+  const threadsOk = threadsHealth.status === 200 && threadsHealth.data?.configured === true && threadsEvaluation.status === 200 && threadsEvaluation.data?.ok === true && threadsDataSource === 'meta_official' && insightFetchFailures === 0;
+  const diagnosticsOk = diagnostics.status === 200 && diagnostics.data?.candidateGeneration === 'ok' && diagnostics.data?.expectedProfitEngine === 'ok';
+  const gatewayOk = gateway.status === 200 && gateway.data?.configured === true;
+  return {
+    status: planOk && threadsOk && diagnosticsOk && gatewayOk ? 200 : 503,
+    data: {
+      ok: planOk && threadsOk && diagnosticsOk && gatewayOk,
+      generatedAt: new Date().toISOString(),
+      scoringVersion: plan.data?.scoringVersion || health.data?.scoringVersion || null,
+      candidateCount: candidates.length,
+      affiliateUrlValidCount,
+      dailyPlanSource: plan.data?.source || null,
+      stale: plan.data?.stale === true,
+      ageMinutes: plan.data?.ageMinutes ?? null,
+      threadsDataSource,
+      insightFetchFailures,
+      threadsPostCount: threadsEvaluation.data?.post_count ?? null,
+      gatewayConfigured: gateway.data?.configured === true,
+      candidateGeneration: diagnostics.data?.candidateGeneration || null,
+      expectedProfitEngine: diagnostics.data?.expectedProfitEngine || null,
+      rakutenApi: diagnostics.data?.rakutenApi || null,
+      lkgAvailable: diagnostics.data?.lkgAvailable ?? health.data?.dailyPlan?.lkgAvailable ?? null,
+      lastError: diagnostics.data?.lastError || null,
+      components: {
+        healthStatus: health.status, dailyPlanStatus: plan.status, threadsHealthStatus: threadsHealth.status,
+        threadsEvaluationStatus: threadsEvaluation.status, diagnosticsStatus: diagnostics.status, gatewayStatus: gateway.status
+      },
+      checks: { planOk, threadsOk, diagnosticsOk, gatewayOk }
+    }
+  };
+}
+
 function page(policy, context) {
   return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cash Flow Engine Control Room</title></head><body><main><h1>Cash Flow Engine #001 Control Room</h1><p>AI COOが発行する運営方針と、Bridgeの現在状態を専門Agentが共通参照するControl Planeです。</p><h2>Operating Policy</h2><pre>${esc(JSON.stringify(policy,null,2))}</pre><h2>System Context</h2><pre>${esc(JSON.stringify(context?.data || {},null,2))}</pre><h2>Decision Contract</h2><pre>${esc(JSON.stringify({authority:'cfe-ai-coo',executionModel:'central_governance_distributed_execution',objective:'maximize_final_profit_through_persistent_safe_experimentation',guardianRole:'sre_only',specialists:['threads-post-agent','night-evaluation-agent','a8-agent','guardian-agent'],modes:SYSTEM_MODES,rules:['Specialist agents obey the latest operating policy.','Guardian may stop unsafe execution but does not change commercial strategy.','AI COO optimizes final profit using Expected Profit + Learning Value + Opportunity Cost of Inaction.','FULL_HOLD is reserved for execution that is actually unsafe.','REVENUE_HOLD blocks revenue posts but keeps safe organic learning experiments alive.','CAUTION uses degraded/LKG operation when safe.','Unless FULL_HOLD, keep at least minExperimentsPerDay safe experiments whenever feasible.','Repeated zero-experiment days are treated as a strategy defect, not a success state.']},null,2))}</pre></main></body></html>`;
 }
@@ -123,7 +171,7 @@ http.createServer = function controlRoomCreateServer(listener) {
     const url=new URL(req.url,`http://${req.headers.host||`127.0.0.1:${PORT}`}`);
     try {
       if(url.pathname==='/automation/control-room' && req.method==='GET'){
-        const [policy,context]=await Promise.all([latestPolicy(),localJson('/automation/daily-context')]);
+        const [policy,context]=await Promise.all([latestPolicy(),buildSystemContext()]);
         const html=page(policy,context);
         res.writeHead(context.status===200?200:503,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex,nofollow','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});res.end(html);return;
       }
