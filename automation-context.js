@@ -3,12 +3,42 @@ import { URL } from 'node:url';
 import { loadDailyPlanLkg } from './supabase-store.js';
 
 const PORT = Number(process.env.PORT || 10000);
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
+}
+
+function jstDateKey(input = new Date()) {
+  return new Date(input.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function deriveThreadsToday(threadsEvaluation) {
+  const source = threadsEvaluation?.data || {};
+  const key = jstDateKey();
+  const posts = (Array.isArray(source.posts) ? source.posts : []).filter(p => String(p?.post_timestamp || '').slice(0, 10) === key);
+  const failed = posts.filter(p => p?.insight_fetch_ok === false).length;
+  return {
+    status: threadsEvaluation?.status || 0,
+    data: {
+      ok: source.ok === true,
+      account: source.account || null,
+      target_account: source.target_account || null,
+      days: 1,
+      date: key,
+      timezone: 'Asia/Tokyo',
+      post_count: posts.length,
+      threads_data_source: source.threads_data_source || source.source || null,
+      source: source.source || source.threads_data_source || null,
+      fetched_at: source.fetched_at || null,
+      insight_fetch_failures: failed,
+      derived_from: 'threads_evaluation_7d_jst_filter',
+      posts
+    }
+  };
 }
 
 async function localJson(path, timeoutMs = 20000) {
@@ -57,44 +87,27 @@ http.createServer = function automationContextCreateServer(listener) {
         const result = {
           ok: Boolean(cached?.plan && fresh && candidates.length >= 20 && validAffiliateCount >= 20),
           test: 'simulated_rakuten_timeout_to_persisted_lkg',
-          simulatedFailure: {
-            error: 'expected_profit_plan_unavailable',
-            reason: 'rakuten_api_timeout',
-            retryable: true
-          },
+          simulatedFailure: { error:'expected_profit_plan_unavailable', reason:'rakuten_api_timeout', retryable:true },
           persistedLkg: {
-            found: Boolean(cached?.plan),
-            scoringVersion: cached?.plan?.scoringVersion || null,
+            found: Boolean(cached?.plan), scoringVersion: cached?.plan?.scoringVersion || null,
             generatedAt: cached?.plan?.generatedAt || cached?.eventTime || null,
-            ageMinutes,
-            freshWithin24h: fresh,
-            candidateCount: candidates.length,
-            affiliateUrlValidCount: validAffiliateCount
+            ageMinutes, freshWithin24h:fresh, candidateCount:candidates.length, affiliateUrlValidCount:validAffiliateCount
           },
           recoveryDecision: cached?.plan && fresh && candidates.length >= 20 && validAffiliateCount >= 20
             ? 'serve_last_known_good_as_stale_degraded_candidate'
             : 'return_structured_error_and_hold_revenue_post'
         };
-        res.writeHead(result.ok ? 200 : 503, {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'Access-Control-Allow-Origin': '*',
-          'X-Content-Type-Options': 'nosniff'
-        });
+        res.writeHead(result.ok ? 200 : 503, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'*','X-Content-Type-Options':'nosniff'});
         res.end(JSON.stringify(result));
         return;
       }
 
       if (url.pathname === '/automation/daily-context' && req.method === 'GET') {
         const [health, plan, threadsHealth, threadsEvaluation, diagnostics, gatewayStatus] = await Promise.all([
-          localJson('/health'),
-          localJson('/daily-plan'),
-          localJson('/threads/health'),
-          localJson('/threads/evaluation-data?days=7'),
-          localJson('/diagnostics/daily-plan'),
-          localJson('/automation/gateway-status')
+          localJson('/health'), localJson('/daily-plan'), localJson('/threads/health'),
+          localJson('/threads/evaluation-data?days=7'), localJson('/diagnostics/daily-plan'), localJson('/automation/gateway-status')
         ]);
-
+        const threadsToday = deriveThreadsToday(threadsEvaluation);
         const candidates = Array.isArray(plan?.data?.candidates) ? plan.data.candidates : [];
         const affiliateUrlValidCount = candidates.filter(x => typeof x?.affiliateUrl === 'string' && /^https?:\/\//.test(x.affiliateUrl)).length;
         const threadsDataSource = threadsEvaluation.data?.threads_data_source || threadsEvaluation.data?.source || null;
@@ -105,8 +118,7 @@ http.createServer = function automationContextCreateServer(listener) {
         const threadsOk = threadsHealth.status === 200 && threadsHealth.data?.configured === true &&
           threadsEvaluation.status === 200 && threadsEvaluation.data?.ok === true &&
           threadsDataSource === 'meta_official' && insightFetchFailures === 0;
-        const diagnosticsOk = diagnostics.status === 200 && diagnostics.data?.candidateGeneration === 'ok' &&
-          diagnostics.data?.expectedProfitEngine === 'ok';
+        const diagnosticsOk = diagnostics.status === 200 && diagnostics.data?.candidateGeneration === 'ok' && diagnostics.data?.expectedProfitEngine === 'ok';
         const gatewayOk = gatewayStatus.status === 200 && gatewayStatus.data?.configured === true;
 
         const summary = {
@@ -124,31 +136,23 @@ http.createServer = function automationContextCreateServer(listener) {
           threadsHealthStatus: threadsHealth.status,
           threadsConfigured: threadsHealth.data?.configured === true,
           threadsDataSource,
-          threadsPostCount: threadsEvaluation.data?.post_count ?? null,
+          threadsPostCount7d: threadsEvaluation.data?.post_count ?? null,
+          threadsTodayPostCount: threadsToday.data?.post_count ?? null,
+          threadsTodayDate: threadsToday.data?.date || null,
           insightFetchFailures,
+          threadsTodayInsightFetchFailures: threadsToday.data?.insight_fetch_failures ?? null,
           diagnosticsStatus: diagnostics.status,
           candidateGeneration: diagnostics.data?.candidateGeneration || null,
           expectedProfitEngine: diagnostics.data?.expectedProfitEngine || null,
           rakutenApi: diagnostics.data?.rakutenApi || null,
           lastError: diagnostics.data?.lastError || null,
           automationGatewayConfigured: gatewayStatus.data?.configured === true,
-          planOk,
-          threadsOk,
-          diagnosticsOk,
-          gatewayOk
+          planOk, threadsOk, diagnosticsOk, gatewayOk
         };
 
-        const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cash Flow Engine Daily Context</title></head><body><main><h1>Cash Flow Engine Daily Context</h1><p>This page is an Automation-compatible read-only mirror of the canonical Cash Flow Engine bridge data. It contains no API keys or secrets.</p><section id="summary"><h2>Summary</h2><pre>${escapeHtml(JSON.stringify(summary, null, 2))}</pre></section>${section('Rakuten / Expected Profit Health','health',health)}${section('Expected Profit Daily Plan','daily-plan',plan)}${section('Daily Plan Diagnostics','diagnostics',diagnostics)}${section('Automation Gateway Status','automation-gateway',gatewayStatus)}${section('Threads Health','threads-health',threadsHealth)}${section('Threads Evaluation 7 Days','threads-evaluation',threadsEvaluation)}</main></body></html>`;
+        const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cash Flow Engine Daily Context</title></head><body><main><h1>Cash Flow Engine Daily Context</h1><p>This page is an Automation-compatible read-only mirror of the canonical Cash Flow Engine bridge data. It contains no API keys or secrets.</p><section id="summary"><h2>Summary</h2><pre>${escapeHtml(JSON.stringify(summary, null, 2))}</pre></section>${section('Rakuten / Expected Profit Health','health',health)}${section('Expected Profit Daily Plan','daily-plan',plan)}${section('Daily Plan Diagnostics','diagnostics',diagnostics)}${section('Automation Gateway Status','automation-gateway',gatewayStatus)}${section('Threads Health','threads-health',threadsHealth)}${section('Threads Today (JST derived from canonical 7-day data)','threads-today',threadsToday)}${section('Threads Evaluation 7 Days','threads-evaluation',threadsEvaluation)}</main></body></html>`;
 
-        res.writeHead(summary.ok ? 200 : 503, {
-          'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-store',
-          'Pragma': 'no-cache',
-          'Access-Control-Allow-Origin': '*',
-          'X-Robots-Tag': 'noindex, nofollow',
-          'Referrer-Policy': 'no-referrer',
-          'X-Content-Type-Options': 'nosniff'
-        });
+        res.writeHead(summary.ok ? 200 : 503, {'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Pragma':'no-cache','Access-Control-Allow-Origin':'*','X-Robots-Tag':'noindex, nofollow','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});
         res.end(html);
         return;
       }
