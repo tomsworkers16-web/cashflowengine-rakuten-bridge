@@ -7,7 +7,19 @@ const workflow = {
   version: 'external-reply-v1',
   mode: 'chatgpt_assisted_human_send',
   enabled: true,
-  discoverySource: 'external_browser_or_search',
+  discoverySource: 'tinyfish_cloud_browser',
+  localPcRequired: false,
+  browserRuntime: {
+    provider: 'tinyfish',
+    profileName: 'Threads専用',
+    profileId: 'prof_2c19d1241c4e4682',
+    targetUrl: 'https://www.threads.com',
+    useSavedProfile: true,
+    expectedAccount: 'rakumitsu_select',
+    readOnly: true,
+    allowedActions: ['read', 'discover', 'inspect_reply_state'],
+    prohibitedActions: ['post', 'reply', 'like', 'follow', 'repost']
+  },
   officialApiAutonomousExternalReply: false,
   dailyCap: 5,
   discoveryWindowsJst: ['08:30', '18:30'],
@@ -31,7 +43,16 @@ const workflow = {
     politicsInflammatorySensitive: false,
     duplicateOrNearDuplicateReplies: false,
     massReplying: false,
-    skipUnclearContext: true
+    skipUnclearContext: true,
+    autoChargeAllowed: false,
+    credentialDisclosureAllowed: false
+  },
+  exceptionPolicy: {
+    userActionRequiredOnlyFor: [
+      'tinyfish_session_expired',
+      'meta_identity_verification',
+      'tinyfish_wallet_insufficient'
+    ]
   },
   learning: {
     trackCandidate: true,
@@ -56,6 +77,11 @@ function selfTest() {
     passed:
       workflow.dailyCap === 5 &&
       workflow.userFacingDraftCount === 1 &&
+      workflow.discoverySource === 'tinyfish_cloud_browser' &&
+      workflow.localPcRequired === false &&
+      workflow.browserRuntime.provider === 'tinyfish' &&
+      workflow.browserRuntime.profileId === 'prof_2c19d1241c4e4682' &&
+      workflow.browserRuntime.readOnly === true &&
       workflow.notification.directTargetPermalinkRequired === true &&
       workflow.notification.replyTextStandaloneRequired === true &&
       workflow.notification.copyReplyTextOnly === true &&
@@ -64,6 +90,10 @@ function selfTest() {
     checks: {
       dailyCapFive: workflow.dailyCap === 5,
       oneBestReply: workflow.userFacingDraftCount === 1,
+      tinyfishPrimary: workflow.discoverySource === 'tinyfish_cloud_browser',
+      pcIndependent: workflow.localPcRequired === false,
+      expectedProfile: workflow.browserRuntime.profileId === 'prof_2c19d1241c4e4682',
+      readOnlyBrowser: workflow.browserRuntime.readOnly === true,
       directLinkRequired: workflow.notification.directTargetPermalinkRequired === true,
       copyReplyOnly: workflow.notification.copyReplyTextOnly === true,
       followupPriority: workflow.priorities[0] === 'conversation_followup',
