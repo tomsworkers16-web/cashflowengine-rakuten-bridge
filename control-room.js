@@ -78,24 +78,24 @@ async function latestPolicy() {
   try {
     const rows = await sb('system_events?select=id,event_time,metadata,message&component=eq.cfe-ai-coo&event_type=eq.operating_policy&order=event_time.desc&limit=1');
     const row = Array.isArray(rows) && rows.length ? rows[0] : null;
-    if (row?.metadata?.policy) return normalizePolicy(row.metadata.policy, 'supabase', row.event_time);
+    if (row?.metadata?.policy) return normalizePolicy(row.metadata.policy, 'supabase-baseline', row.event_time);
   } catch {}
   return normalizePolicy({
     systemMode:'NORMAL', postingEnabled:true, revenuePostingEnabled:true, organicPostingEnabled:true,
-    priority:'expected_profit_plus_learning_value', exploitRatio:0.8, exploreRatio:0.2,
-    maxPostsPerDay:5, minExperimentsPerDay:1,
-    notes:'Default profit-first policy: safe experimentation continues unless execution itself is unsafe.'
-  }, 'default', null);
+    priority:'expected_profit_plus_learning_value', exploitRatio:0.75, exploreRatio:0.25,
+    maxPostsPerDay:3, minExperimentsPerDay:1,
+    notes:'Default profit-first baseline; runtime safety mode is resolved by Control Room.'
+  }, 'default-baseline', null);
 }
 
 async function savePolicy(policy) {
-  const clean = normalizePolicy({ ...policy, issuedAt:new Date().toISOString() }, 'ai-coo', null);
+  const clean = normalizePolicy({ ...policy, issuedAt:new Date().toISOString() }, 'manual-baseline', null);
   delete clean.source;
   delete clean.eventTime;
   const data = await sb('system_events', { method:'POST', prefer:'return=representation', body:{
     component:'cfe-ai-coo', event_type:'operating_policy',
     severity: clean.systemMode === 'NORMAL' ? 'info' : clean.systemMode === 'FULL_HOLD' ? 'error' : 'warning',
-    message:'Cash Flow Engine #001 operating policy issued by AI COO.', resolved:true, resolution:'policy_active', metadata:{ policy:clean }
+    message:'Cash Flow Engine #001 baseline operating policy updated.', resolved:true, resolution:'policy_active', metadata:{ policy:clean }
   }});
   return { row:Array.isArray(data)?data[0]:data, policy:clean };
 }
@@ -157,12 +157,44 @@ async function buildSystemContext() {
   };
 }
 
+function resolveEffectivePolicy(baseline, context = {}) {
+  const checks = context.checks || {};
+  const reasons = [];
+  let mode = 'NORMAL';
+  if (checks.threadsOk === false || checks.gatewayOk === false) {
+    mode = 'FULL_HOLD';
+    if (checks.threadsOk === false) reasons.push('threads_execution_path_unhealthy');
+    if (checks.gatewayOk === false) reasons.push('posting_gateway_unhealthy');
+  } else if (checks.planOk === false || checks.diagnosticsOk === false) {
+    mode = 'REVENUE_HOLD';
+    if (checks.planOk === false) reasons.push('revenue_plan_unavailable');
+    if (checks.diagnosticsOk === false) reasons.push('expected_profit_diagnostics_unhealthy');
+  } else if (context.stale === true || context.rakutenApi === 'degraded') {
+    mode = 'CAUTION';
+    if (context.stale === true) reasons.push('using_stale_or_lkg_plan');
+    if (context.rakutenApi === 'degraded') reasons.push('rakuten_api_partial_degradation');
+  }
+  const fullHold = mode === 'FULL_HOLD';
+  const revenueHold = mode === 'REVENUE_HOLD';
+  return {
+    ...baseline,
+    source:`effective-resolver:${baseline.source || 'baseline'}`,
+    systemMode:mode,
+    postingEnabled: fullHold ? false : baseline.postingEnabled !== false,
+    revenuePostingEnabled: (fullHold || revenueHold) ? false : baseline.revenuePostingEnabled !== false,
+    organicPostingEnabled: fullHold ? false : baseline.organicPostingEnabled !== false,
+    minExperimentsPerDay: fullHold ? 0 : Math.max(1, Number(baseline.minExperimentsPerDay || 1)),
+    holdReasons:reasons,
+    runtimeResolvedAt:new Date().toISOString()
+  };
+}
+
 function page(policy, context) {
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cash Flow Engine Control Room</title></head><body><main><h1>Cash Flow Engine #001 Control Room</h1><p>AI COOが発行する運営方針と、Bridgeの現在状態を専門Agentが共通参照するControl Planeです。</p><h2>Operating Policy</h2><pre>${esc(JSON.stringify(policy,null,2))}</pre><h2>System Context</h2><pre>${esc(JSON.stringify(context?.data || {},null,2))}</pre><h2>Decision Contract</h2><pre>${esc(JSON.stringify({authority:'cfe-ai-coo',executionModel:'central_governance_distributed_execution',objective:'maximize_final_profit_through_persistent_safe_experimentation',guardianRole:'sre_only',specialists:['threads-post-agent','night-evaluation-agent','a8-agent','guardian-agent'],modes:SYSTEM_MODES,rules:['Specialist agents obey the latest operating policy.','Guardian may stop unsafe execution but does not change commercial strategy.','AI COO optimizes final profit using Expected Profit + Learning Value + Opportunity Cost of Inaction.','FULL_HOLD is reserved for execution that is actually unsafe.','REVENUE_HOLD blocks revenue posts but keeps safe organic learning experiments alive.','CAUTION uses degraded/LKG operation when safe.','Unless FULL_HOLD, keep at least minExperimentsPerDay safe experiments whenever feasible.','Repeated zero-experiment days are treated as a strategy defect, not a success state.']},null,2))}</pre></main></body></html>`;
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cash Flow Engine Control Room</title></head><body><main><h1>Cash Flow Engine #001 Control Room</h1><p>戦略baselineと実システム状態から、専門Agentが共通参照するEffective Operating Policyをサーバー側で自動解決します。</p><h2>Effective Operating Policy</h2><pre>${esc(JSON.stringify(policy,null,2))}</pre><h2>System Context</h2><pre>${esc(JSON.stringify(context?.data || {},null,2))}</pre><h2>Decision Contract</h2><pre>${esc(JSON.stringify({strategicAuthority:'cfe-ai-coo',runtimeAuthority:'control-room-policy-resolver',executionModel:'central_governance_distributed_execution',objective:'maximize_final_profit_through_persistent_safe_experimentation',guardianRole:'sre_only',specialists:['auto-post-supervisor','night-evaluation-agent','a8-agent','guardian-agent'],modes:SYSTEM_MODES,rules:['AI COO evaluates commercial strategy and recommends baseline changes.','Control Room resolves runtime safety mode from live system facts; browser policy writes are not required for daily operation.','Guardian may report unsafe execution but does not change commercial strategy.','FULL_HOLD is reserved for execution-path danger.','REVENUE_HOLD blocks revenue posts but keeps safe organic learning experiments alive.','CAUTION keeps revenue experiments running when the system is usable but partially degraded.','Unless FULL_HOLD, keep at least minExperimentsPerDay safe experiments whenever feasible.','Repeated zero-experiment days are treated as a strategy defect, not a success state.']},null,2))}</pre></main></body></html>`;
 }
 
 function commandPage(result=null) {
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>CFE AI COO Policy Console</title></head><body><h1>CFE AI COO Policy Console</h1><p>AI COO専用。資格情報はPOST本文でのみ送信され、結果には表示されません。</p><form method="post"><label>Automation credential <input type="password" name="automation_token" required></label><label>Policy JSON<textarea name="policy" rows="18" cols="80" required>{"systemMode":"NORMAL","postingEnabled":true,"revenuePostingEnabled":true,"organicPostingEnabled":true,"priority":"expected_profit_plus_learning_value","exploitRatio":0.8,"exploreRatio":0.2,"maxPostsPerDay":5,"minExperimentsPerDay":1,"priorityThemes":[],"holdReasons":[],"notes":"Keep safe experimentation running; inactivity is an opportunity cost."}</textarea></label><button>Issue policy</button></form>${result?`<h2>Result</h2><pre>${esc(JSON.stringify(result,null,2))}</pre>`:''}</body></html>`;
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>CFE Baseline Policy Console</title></head><body><h1>CFE Baseline Policy Console</h1><p>手動のbaseline変更専用です。日常運転では使用しません。資格情報はPOST本文でのみ送信され、結果には表示されません。</p><form method="post"><label>Automation credential <input type="password" name="automation_token" required></label><label>Policy JSON<textarea name="policy" rows="18" cols="80" required>{"systemMode":"NORMAL","postingEnabled":true,"revenuePostingEnabled":true,"organicPostingEnabled":true,"priority":"expected_profit_plus_learning_value","exploitRatio":0.75,"exploreRatio":0.25,"maxPostsPerDay":3,"minExperimentsPerDay":1,"priorityThemes":[],"holdReasons":[],"notes":"Baseline strategy only; runtime safety mode is resolved automatically."}</textarea></label><button>Update baseline</button></form>${result?`<h2>Result</h2><pre>${esc(JSON.stringify(result,null,2))}</pre>`:''}</body></html>`;
 }
 
 const nativeCreateServer = http.createServer.bind(http);
@@ -171,7 +203,8 @@ http.createServer = function controlRoomCreateServer(listener) {
     const url=new URL(req.url,`http://${req.headers.host||`127.0.0.1:${PORT}`}`);
     try {
       if(url.pathname==='/automation/control-room' && req.method==='GET'){
-        const [policy,context]=await Promise.all([latestPolicy(),buildSystemContext()]);
+        const [baseline,context]=await Promise.all([latestPolicy(),buildSystemContext()]);
+        const policy=resolveEffectivePolicy(baseline,context.data);
         const html=page(policy,context);
         res.writeHead(context.status===200?200:503,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Robots-Tag':'noindex,nofollow','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'});res.end(html);return;
       }
