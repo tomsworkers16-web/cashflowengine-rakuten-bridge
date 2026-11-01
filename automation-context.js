@@ -4,6 +4,7 @@ import { loadDailyPlanLkg } from './supabase-store.js';
 
 const PORT = Number(process.env.PORT || 10000);
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const PREDICTION_EVALUATION_WINDOW_HOURS = 24;
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -14,6 +15,31 @@ function escapeHtml(value) {
 
 function jstDateKey(input = new Date()) {
   return new Date(input.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function normalizePredictionSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot || null;
+  const objectiveRole = snapshot.objective_role || snapshot.content_type || null;
+  const allocationMode = snapshot.allocation_mode || snapshot.portfolio_role || snapshot.signal_type || null;
+  const expectedViews24h = snapshot.expected_views_24h ?? snapshot.expected_views ?? null;
+  return {
+    ...snapshot,
+    objective_role: objectiveRole,
+    allocation_mode: allocationMode,
+    expected_views_24h: expectedViews24h,
+    evaluation_window_hours: Number(snapshot.evaluation_window_hours || PREDICTION_EVALUATION_WINDOW_HOURS),
+    prediction_schema_version: snapshot.prediction_schema_version || 'prediction-v2-market-plus-calibration'
+  };
+}
+
+function normalizeThreadsEvaluation(result) {
+  if (!result || typeof result !== 'object') return result;
+  const data = result.data || {};
+  const posts = (Array.isArray(data.posts) ? data.posts : []).map(post => ({
+    ...post,
+    prediction_snapshot: normalizePredictionSnapshot(post?.prediction_snapshot)
+  }));
+  return { ...result, data: { ...data, posts } };
 }
 
 function deriveThreadsToday(threadsEvaluation) {
@@ -103,10 +129,11 @@ http.createServer = function automationContextCreateServer(listener) {
       }
 
       if (url.pathname === '/automation/daily-context' && req.method === 'GET') {
-        const [health, plan, threadsHealth, threadsEvaluation, diagnostics, gatewayStatus] = await Promise.all([
+        const [health, plan, threadsHealth, rawThreadsEvaluation, diagnostics, gatewayStatus] = await Promise.all([
           localJson('/health'), localJson('/daily-plan'), localJson('/threads/health'),
           localJson('/threads/evaluation-data?days=7'), localJson('/diagnostics/daily-plan'), localJson('/automation/gateway-status')
         ]);
+        const threadsEvaluation = normalizeThreadsEvaluation(rawThreadsEvaluation);
         const threadsToday = deriveThreadsToday(threadsEvaluation);
         const candidates = Array.isArray(plan?.data?.candidates) ? plan.data.candidates : [];
         const affiliateUrlValidCount = candidates.filter(x => typeof x?.affiliateUrl === 'string' && /^https?:\/\//.test(x.affiliateUrl)).length;
@@ -127,6 +154,10 @@ http.createServer = function automationContextCreateServer(listener) {
           healthStatus: health.status,
           configured: health.data?.configured === true,
           scoringVersion: plan.data?.scoringVersion || health.data?.scoringVersion || null,
+          predictionSchemaVersion: 'prediction-v2-market-plus-calibration',
+          predictionEvaluationWindowHours: PREDICTION_EVALUATION_WINDOW_HOURS,
+          objectiveRoleField: 'objective_role',
+          allocationModeField: 'allocation_mode',
           dailyPlanStatus: plan.status,
           dailyPlanSource: plan.data?.source || null,
           stale: plan.data?.stale === true,
