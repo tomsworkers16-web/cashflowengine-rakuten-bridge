@@ -27,6 +27,7 @@ const KEYWORDS = (env.RAKUTEN_KEYWORDS || 'キッチン 便利グッズ,収納 �
 const EXTERNAL_REPLY_ENABLED = String(env.CFE_EXTERNAL_REPLY_ENABLED || 'false').toLowerCase() === 'true';
 const EXTERNAL_REPLY_MAX = Math.max(1, Math.min(10, Number(env.CFE_EXTERNAL_REPLY_MAX_PER_DAY || 3)));
 const EXTERNAL_REPLY_MIN_SCORE = Math.max(20, Math.min(90, Number(env.CFE_EXTERNAL_REPLY_MIN_SCORE || 45)));
+const DISCOVERY_QUERIES = (env.THREADS_DISCOVERY_QUERIES || '家事 時短,収納 困る,掃除 面倒,献立 悩み,便利グッズ').split(',').map(s => s.trim()).filter(Boolean).slice(0, 5);
 const JST = 9 * 60 * 60 * 1000;
 
 const stateFile = path.join(DATA_DIR, 'state.json');
@@ -223,23 +224,59 @@ async function postingTick() {
 const chromeCandidates = ['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'];
 function chromeExe() { const p = chromeCandidates.find(fs.existsSync); if (!p) throw new Error('chrome_not_found'); return p; }
 
+async function extractCandidates(page, source) {
+  await page.waitForTimeout(2500);
+  await page.mouse.wheel(0, 1600).catch(() => {});
+  await page.waitForTimeout(1200);
+  return page.locator('a[href*="/post/"]').evaluateAll((links, sourceName) => {
+    const rows = [];
+    for (const a of links.slice(0, 80)) {
+      const href = a.getAttribute('href');
+      if (!href) continue;
+      let node = a;
+      let container = null;
+      for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+        const txt = (node.innerText || '').replace(/\s+/g, ' ').trim();
+        if (txt.length >= 25 && txt.length <= 2500) { container = node; }
+      }
+      container = container || a.closest('article') || a.parentElement;
+      if (!container) continue;
+      const text = (container.innerText || '').replace(/\s+/g, ' ').trim();
+      const authorHref = [...container.querySelectorAll('a[href^="/@"]')].map(x => x.getAttribute('href')).find(Boolean) || '';
+      rows.push({ href, text, author: authorHref.replace(/^\//, ''), discoverySource: sourceName });
+    }
+    return rows;
+  }, source).catch(() => []);
+}
+
 async function scanThreads(page) {
-  await page.goto('https://www.threads.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(5000);
-  if (/login|accounts\/login/i.test(page.url())) return { loggedIn: false, candidates: [] };
-  const posts = await page.locator('article').evaluateAll(arts => arts.slice(0, 40).map(a => {
-    const text = (a.innerText || '').replace(/\s+/g, ' ').trim();
-    const h = [...a.querySelectorAll('a[href*="/post/"]')].map(x => x.getAttribute('href')).find(Boolean);
-    const au = [...a.querySelectorAll('a[href^="/@"]')].map(x => x.getAttribute('href')).find(Boolean) || '';
-    return { text, href: h, author: au.replace(/^\//, '') };
-  }).filter(x => x.href && x.text)).catch(() => []);
-  const seen = new Set(), out = [];
-  for (const p of posts) {
-    const url = p.href.startsWith('http') ? p.href : `https://www.threads.com${p.href}`;
-    if (seen.has(url)) continue; seen.add(url);
-    out.push({ source: 'm8-local-playwright', author: p.author, url, text: p.text.slice(0, 1200), discoveredAt: new Date().toISOString() });
+  const targets = [{ url: 'https://www.threads.com/', source: 'home' }];
+  for (const q of DISCOVERY_QUERIES) {
+    targets.push({ url: `https://www.threads.com/search?q=${encodeURIComponent(q)}&serp_type=default`, source: `search:${q}` });
   }
-  return { loggedIn: true, candidates: out.slice(0, 20) };
+
+  const seen = new Set();
+  const out = [];
+  let loggedIn = true;
+  for (const target of targets) {
+    try {
+      await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(1800);
+      if (/login|accounts\/login/i.test(page.url())) { loggedIn = false; break; }
+      const posts = await extractCandidates(page, target.source);
+      for (const p of posts) {
+        if (!p.href || !p.text) continue;
+        const url = p.href.startsWith('http') ? p.href : `https://www.threads.com${p.href}`;
+        if (seen.has(url)) continue;
+        seen.add(url);
+        out.push({ source: 'm8-local-playwright', discoverySource: p.discoverySource, author: p.author, url, text: p.text.slice(0, 1200), discoveredAt: new Date().toISOString() });
+      }
+      if (out.length >= 30) break;
+    } catch (e) {
+      event('THREADS_DISCOVERY_TARGET_ERROR', { source: target.source, error: e.message });
+    }
+  }
+  return { loggedIn, candidates: out.slice(0, 30) };
 }
 
 async function browserLoop() {
@@ -265,8 +302,8 @@ async function browserLoop() {
           state.lastBrowserError = 'threads_reauth_required';
           event('THREADS_REAUTH_REQUIRED');
         } else {
-          fs.writeFileSync(candidatesFile, JSON.stringify({ scannedAt: state.lastThreadsScanAt, candidates: r.candidates.map(c => ({...c, evaluation: scoreCandidate(c, { ownUsername })})) }, null, 2), 'utf8');
-          event('THREADS_SCAN', { count: r.candidates.length, eligible: state.lastEligibleReplyCount });
+          fs.writeFileSync(candidatesFile, JSON.stringify({ scannedAt: state.lastThreadsScanAt, queries: DISCOVERY_QUERIES, candidates: r.candidates.map(c => ({...c, evaluation: scoreCandidate(c, { ownUsername })})) }, null, 2), 'utf8');
+          event('THREADS_SCAN', { count: r.candidates.length, eligible: state.lastEligibleReplyCount, queries: DISCOVERY_QUERIES.length });
           const rr = await replyEngine.run(page, r.candidates);
           state.lastExternalReplyResult = rr;
           if (rr.posted > 0) state.lastExternalReplyAt = new Date().toISOString();
@@ -296,7 +333,7 @@ http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok: true, mode: 'm8-local-only', state, threads: th,
       autoPostEnabled: AUTO_POST_ENABLED, slots: SLOTS, maxPostsPerDay: MAX_POSTS,
-      externalReply: { enabled: EXTERNAL_REPLY_ENABLED, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, browserOk: state.browserOk, lastError: state.lastBrowserError },
+      externalReply: { enabled: EXTERNAL_REPLY_ENABLED, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, browserOk: state.browserOk, lastError: state.lastBrowserError, discoveryQueries: DISCOVERY_QUERIES },
       externalRuntimeDependencies: [], directExternalApis: ['Meta Threads API','Rakuten API']
     }, null, 2)); return;
   }
