@@ -13,6 +13,14 @@ if($envText -match '(?m)^THREADS_HEADLESS='){
 }
 Set-Content -Path $envPath -Value $envText -Encoding UTF8
 
+# Enable Chromium sandbox in the local Playwright runtime to remove --no-sandbox mode.
+$corePath=Join-Path $root 'src\local-core.js'
+$coreText=Get-Content $corePath -Raw
+if($coreText -notmatch 'chromiumSandbox:\s*true'){
+  $coreText=$coreText -replace 'headless:\s*HEADLESS,', "headless: HEADLESS,`r`n      chromiumSandbox: true,"
+  Set-Content -Path $corePath -Value $coreText -Encoding UTF8
+}
+
 $taskName='CashFlowEngine-M8-LocalCore'
 $watchdogTask='CashFlowEngine-M8-Watchdog'
 $runner=Join-Path $root 'run-local-core-hidden.ps1'
@@ -37,6 +45,6 @@ Start-ScheduledTask -TaskName $taskName
 
 Write-Host 'M8 server mode configured.' -ForegroundColor Green
 Write-Host 'Local Core: hidden background task'
-Write-Host 'Threads browser: headless'
+Write-Host 'Threads browser: headless with Chromium sandbox enabled'
 Write-Host 'Watchdog: every 5 minutes'
 Write-Host 'Health: http://127.0.0.1:18787/health'
