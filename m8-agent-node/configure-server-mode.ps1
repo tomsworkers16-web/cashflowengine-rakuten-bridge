@@ -21,13 +21,15 @@ if ($envText -match '(?m)^THREADS_HEADLESS=') {
 }
 Set-Content -Path $envPath -Value $envText -Encoding UTF8
 
-# Important: never rewrite src/local-core.js from this setup script.
-# Runtime source changes must be committed through Git to avoid local encoding/syntax corruption.
+# Important: never rewrite tracked runtime source from this setup script.
+# Runtime source changes must come from Git and be validated before deployment.
 
 $taskName = 'CashFlowEngine-M8-LocalCore'
 $watchdogTask = 'CashFlowEngine-M8-Watchdog'
+$autoUpdateTask = 'CashFlowEngine-M8-AutoUpdate'
 $runner = Join-Path $root 'run-local-core-hidden.ps1'
 $watchdog = Join-Path $root 'watchdog.ps1'
+$autoUpdate = Join-Path $root 'auto-update-agent.ps1'
 
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $runner) -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn
@@ -37,6 +39,12 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Se
 $wdCommand = 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $watchdog
 & schtasks.exe /Create /TN $watchdogTask /TR $wdCommand /SC MINUTE /MO 5 /F | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Failed to register watchdog scheduled task.' }
+
+if (Test-Path $autoUpdate) {
+  $auCommand = 'powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $autoUpdate
+  & schtasks.exe /Create /TN $autoUpdateTask /TR $auCommand /SC MINUTE /MO 5 /RL HIGHEST /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to register auto update scheduled task.' }
+}
 
 Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
@@ -51,6 +59,7 @@ try {
 
 $mainTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
 $wdTask = Get-ScheduledTask -TaskName $watchdogTask -ErrorAction Stop
+$auTask = Get-ScheduledTask -TaskName $autoUpdateTask -ErrorAction SilentlyContinue
 
 if (-not $healthOk) {
   Write-Host ('Local Core task: ' + $mainTask.State) -ForegroundColor Yellow
@@ -62,7 +71,9 @@ if (-not $healthOk) {
 Write-Host 'M8 server mode configured.' -ForegroundColor Green
 Write-Host ('Local Core task: ' + $mainTask.State)
 Write-Host ('Watchdog task: ' + $wdTask.State)
+if ($auTask) { Write-Host ('Auto Update task: ' + $auTask.State) }
 Write-Host 'Threads browser: headless'
 Write-Host 'Watchdog: every 5 minutes'
+if ($auTask) { Write-Host 'Auto Update: every 5 minutes with preflight validation and rollback' }
 Write-Host 'Health check: OK'
 Write-Host 'Health: http://127.0.0.1:18787/health'
