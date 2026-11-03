@@ -29,6 +29,7 @@ Set-EnvValue 'CFE_EXTERNAL_REPLY_MAX_PER_DAY' '3'
 Set-EnvValue 'CFE_EXTERNAL_REPLY_MIN_SCORE' '45'
 Set-EnvValue 'THREADS_SCAN_INTERVAL_MINUTES' '30'
 Set-EnvValue 'THREADS_HEADLESS' 'true'
+Set-EnvValue 'THREADS_DISCOVERY_QUERIES' '家事 時短,収納 困る,掃除 面倒,献立 悩み,便利グッズ'
 
 $node = 'C:\Program Files\nodejs\node.exe'
 if (-not (Test-Path $node)) {
@@ -53,7 +54,7 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object {
 
 Start-Sleep -Seconds 1
 Start-ScheduledTask -TaskName $task
-Start-Sleep -Seconds 6
+Start-Sleep -Seconds 8
 
 $health = Invoke-RestMethod -Uri 'http://127.0.0.1:18787/health' -TimeoutSec 15
 if ($health.ok -ne $true) { throw 'Local Core health check failed' }
@@ -66,4 +67,5 @@ Write-Host ('External Reply: ' + $health.externalReply.enabled)
 Write-Host ('External Reply max/day: ' + $health.externalReply.maxPerDay)
 Write-Host ('External Reply min score: ' + $health.externalReply.minScore)
 Write-Host ('Browser OK: ' + $health.externalReply.browserOk)
+Write-Host ('Discovery queries: ' + (($health.externalReply.discoveryQueries -join ', ')))
 Write-Host 'Health: http://127.0.0.1:18787/health'
