@@ -9,16 +9,24 @@ const RAKUTEN_AFFILIATE_ID = env.RAKUTEN_AFFILIATE_ID || '';
 const RAKUTEN_API_BASE = env.RAKUTEN_API_BASE || 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 const KEYWORD = 'キッチン 便利グッズ';
 
+class HttpError extends Error {
+  constructor(status, body) {
+    const detail = body?.error_description || body?.error?.message || body?.error || body?.message || `HTTP ${status}`;
+    super(String(detail));
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function readJson(url, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15000);
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const message = body?.error?.message || body?.message || `HTTP ${res.status}`;
-      throw new Error(message);
-    }
+    const text = await res.text();
+    let body = {};
+    try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text.slice(0, 300) }; }
+    if (!res.ok) throw new HttpError(res.status, body);
     return body;
   } finally {
     clearTimeout(timer);
@@ -51,16 +59,25 @@ async function verifyRakuten() {
   return { ok: true, keyword: KEYWORD, resultCount: items.length };
 }
 
+function safeError(error) {
+  const out = { ok: false, error: error.message };
+  if (error?.status) out.status = error.status;
+  if (error?.body?.error) out.rakutenError = String(error.body.error).slice(0, 200);
+  if (error?.body?.error_description) out.rakutenDescription = String(error.body.error_description).slice(0, 300);
+  if (error?.body?.raw) out.raw = String(error.body.raw).slice(0, 300);
+  return out;
+}
+
 const result = { mode: 'dry-run', postingPerformed: false, threads: null, rakuten: null };
 try {
   result.threads = await verifyThreads();
 } catch (error) {
-  result.threads = { ok: false, error: error.message };
+  result.threads = safeError(error);
 }
 try {
   result.rakuten = await verifyRakuten();
 } catch (error) {
-  result.rakuten = { ok: false, error: error.message };
+  result.rakuten = safeError(error);
 }
 console.log(JSON.stringify(result, null, 2));
 process.exit(result.threads?.ok && result.rakuten?.ok ? 0 : 1);
