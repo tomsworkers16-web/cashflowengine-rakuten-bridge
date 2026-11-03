@@ -6,23 +6,14 @@ Set-Location $root
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-  throw 'Administrator privileges are required. Open Terminal (Admin) and run this script again.'
-}
+if (-not $isAdmin) { throw 'Administrator privileges are required. Open Terminal (Admin) and run this script again.' }
 
-# Force headless browser for normal server operation while preserving the existing persistent profile.
 $envPath = Join-Path $root '.env'
 if (-not (Test-Path $envPath)) { throw '.env not found' }
 $envText = Get-Content $envPath -Raw
-if ($envText -match '(?m)^THREADS_HEADLESS=') {
-  $envText = [regex]::Replace($envText, '(?m)^THREADS_HEADLESS=.*$', 'THREADS_HEADLESS=true')
-} else {
-  $envText += "`r`nTHREADS_HEADLESS=true`r`n"
-}
+if ($envText -match '(?m)^THREADS_HEADLESS=') { $envText = [regex]::Replace($envText, '(?m)^THREADS_HEADLESS=.*$', 'THREADS_HEADLESS=true') }
+else { $envText += "`r`nTHREADS_HEADLESS=true`r`n" }
 Set-Content -Path $envPath -Value $envText -Encoding UTF8
-
-# Important: never rewrite tracked runtime source from this setup script.
-# Runtime source changes must come from Git and be validated before deployment.
 
 $taskName = 'CashFlowEngine-M8-LocalCore'
 $watchdogTask = 'CashFlowEngine-M8-Watchdog'
@@ -46,20 +37,21 @@ if (Test-Path $autoUpdate) {
   if ($LASTEXITCODE -ne 0) { throw 'Failed to register auto update scheduled task.' }
 }
 
+$opsInstaller = Join-Path $root 'install-operations-agents.ps1'
+if (Test-Path $opsInstaller) { & $opsInstaller }
+
 Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 Start-ScheduledTask -TaskName $taskName
 Start-Sleep -Seconds 5
 
 $healthOk = $false
-try {
-  $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18787/health' -TimeoutSec 8
-  if ($r.ok -eq $true) { $healthOk = $true }
-} catch {}
-
+try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18787/health' -TimeoutSec 8; if ($r.ok -eq $true) { $healthOk = $true } } catch {}
 $mainTask = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
 $wdTask = Get-ScheduledTask -TaskName $watchdogTask -ErrorAction Stop
 $auTask = Get-ScheduledTask -TaskName $autoUpdateTask -ErrorAction SilentlyContinue
+$nightTask = Get-ScheduledTask -TaskName 'CashFlowEngine-M8-NightEvaluation' -ErrorAction SilentlyContinue
+$dailyTask = Get-ScheduledTask -TaskName 'CashFlowEngine-M8-DailyCommander' -ErrorAction SilentlyContinue
 
 if (-not $healthOk) {
   Write-Host ('Local Core task: ' + $mainTask.State) -ForegroundColor Yellow
@@ -72,8 +64,12 @@ Write-Host 'M8 server mode configured.' -ForegroundColor Green
 Write-Host ('Local Core task: ' + $mainTask.State)
 Write-Host ('Watchdog task: ' + $wdTask.State)
 if ($auTask) { Write-Host ('Auto Update task: ' + $auTask.State) }
+if ($nightTask) { Write-Host ('Night Evaluation task: ' + $nightTask.State) }
+if ($dailyTask) { Write-Host ('Daily Commander task: ' + $dailyTask.State) }
 Write-Host 'Threads browser: headless'
 Write-Host 'Watchdog: every 5 minutes'
-if ($auTask) { Write-Host 'Auto Update: every 5 minutes with preflight validation and rollback' }
+Write-Host 'Auto Update: every 5 minutes'
+Write-Host 'Night Evaluation: 22:30 JST'
+Write-Host 'Daily Commander: 06:30 JST'
 Write-Host 'Health check: OK'
 Write-Host 'Health: http://127.0.0.1:18787/health'
