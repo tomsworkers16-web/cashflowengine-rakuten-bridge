@@ -12,6 +12,8 @@ const candidatesFile = path.join(dataDir, 'external-reply-candidates.json');
 const strategyFile = path.join(dataDir, 'daily-strategy.json');
 const envFile = path.join(root, '.env');
 const restartFlag = path.join(dataDir, 'restart-required.flag');
+const THREADS_API_BASE = process.env.THREADS_API_BASE || 'https://graph.threads.net/v1.0';
+const THREADS_ACCESS_TOKEN = process.env.THREADS_ACCESS_TOKEN || '';
 const JST = 9 * 60 * 60 * 1000;
 
 fs.mkdirSync(dataDir, { recursive: true });
@@ -19,16 +21,90 @@ fs.mkdirSync(reportsDir, { recursive: true });
 
 function nowJst() { return new Date(Date.now() + JST); }
 function dayKey(d = nowJst()) { return d.toISOString().slice(0, 10); }
+function rowDay(row) {
+  if (row?.jstDate) return String(row.jstDate);
+  const t = Date.parse(row?.at || '');
+  if (!Number.isFinite(t)) return '';
+  return new Date(t + JST).toISOString().slice(0, 10);
+}
 function readJson(file, fallback = null) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
 function readJsonl(file) {
   if (!fs.existsSync(file)) return [];
   return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).map(x => { try { return JSON.parse(x); } catch { return null; } }).filter(Boolean);
 }
 function writeJson(file, value) { fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf8'); }
-function withinDay(row, day) { return String(row?.jstDate || '') === day || String(row?.at || '').slice(0, 10) === day; }
+function withinDay(row, day) { return rowDay(row) === day; }
 function eventCount(rows, type) { return rows.filter(x => x.type === type).length; }
+function escapeRegex(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-function buildNightReport(day = dayKey()) {
+function jstDayBounds(day) {
+  const start = Math.floor(new Date(`${day}T00:00:00+09:00`).getTime() / 1000);
+  return { since: start, until: start + 86400 - 1 };
+}
+
+async function fetchThreads(pathname, params = {}) {
+  if (!THREADS_ACCESS_TOKEN) throw new Error('threads_access_token_missing');
+  const u = new URL(`${THREADS_API_BASE}${pathname}`);
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') u.searchParams.set(k, String(v));
+  u.searchParams.set('access_token', THREADS_ACCESS_TOKEN);
+  const c = new AbortController();
+  const timer = setTimeout(() => c.abort(), 12000);
+  try {
+    const r = await fetch(u, { signal: c.signal });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = data?.error?.message || `HTTP_${r.status}`;
+      const e = new Error(msg);
+      e.status = r.status;
+      throw e;
+    }
+    return data;
+  } finally { clearTimeout(timer); }
+}
+
+function metricValue(item) {
+  if (Number.isFinite(item?.total_value?.value)) return item.total_value.value;
+  if (Array.isArray(item?.link_total_values)) return item.link_total_values.reduce((n, x) => n + (Number.isFinite(x?.value) ? x.value : 0), 0);
+  if (Array.isArray(item?.values)) {
+    const vals = item.values.map(x => x?.value).filter(Number.isFinite);
+    if (vals.length) return vals[vals.length - 1];
+  }
+  return 'unknown';
+}
+
+async function getAccountInsights(day) {
+  try {
+    const { since, until } = jstDayBounds(day);
+    const data = await fetchThreads('/me/threads_insights', {
+      metric: 'views,likes,replies,reposts,quotes,clicks,followers_count',
+      since,
+      until
+    });
+    const out = {};
+    for (const item of data?.data || []) out[item.name] = metricValue(item);
+    return { available: true, error: null, metrics: out, rawMetricNames: (data?.data || []).map(x => x.name) };
+  } catch (e) {
+    return { available: false, error: e.message, metrics: {} };
+  }
+}
+
+async function getPostInsights(posts) {
+  const out = [];
+  for (const p of posts.slice(-5)) {
+    if (!p?.id) continue;
+    try {
+      const data = await fetchThreads(`/${p.id}/insights`, { metric: 'views,likes,replies,reposts,quotes,shares' });
+      const metrics = {};
+      for (const item of data?.data || []) metrics[item.name] = metricValue(item);
+      out.push({ id: p.id, role: p?.meta?.role || 'unknown', slot: p.slot || null, metrics });
+    } catch (e) {
+      out.push({ id: p.id, role: p?.meta?.role || 'unknown', slot: p.slot || null, error: e.message, metrics: {} });
+    }
+  }
+  return out;
+}
+
+async function buildNightReport(day = dayKey()) {
   const state = readJson(stateFile, {});
   const posts = readJsonl(postsFile).filter(x => withinDay(x, day));
   const replies = readJsonl(repliesFile).filter(x => withinDay(x, day));
@@ -37,10 +113,12 @@ function buildNightReport(day = dayKey()) {
   const replyPosted = replies.filter(x => x.status === 'posted');
   const replyFailed = replies.filter(x => x.status === 'failed');
   const errors = events.filter(x => /ERROR|REAUTH|FAILED/.test(String(x.type || '')));
+  const accountInsights = await getAccountInsights(day);
+  const postInsights = await getPostInsights(posts);
   const status = !state.browserOk || replyFailed.length > 0 || eventCount(events, 'POST_ERROR') > 0 ? 'CAUTION' : 'NORMAL';
 
   const report = {
-    version: 'm8-night-eval-v1',
+    version: 'm8-night-eval-v2-insights',
     generatedAt: new Date().toISOString(),
     jstDate: day,
     status,
@@ -57,9 +135,14 @@ function buildNightReport(day = dayKey()) {
       lastExternalReplyAt: state.lastExternalReplyAt || null,
       errors: errors.map(x => ({ at: x.at, type: x.type, error: x.error || null })).slice(-20)
     },
+    threadsInsights: {
+      account: accountInsights,
+      posts: postInsights
+    },
     funnel: {
-      profileViews: 'unknown',
-      linkClicks: 'unknown',
+      profileViews: accountInsights.metrics.views ?? 'unknown',
+      linkClicks: accountInsights.metrics.clicks ?? 'unknown',
+      followersCount: accountInsights.metrics.followers_count ?? 'unknown',
       conversions: 'unknown',
       reward: 'unknown',
       profit: 'unknown'
@@ -68,7 +151,9 @@ function buildNightReport(day = dayKey()) {
       keepAutoPostEnabled: true,
       keepExternalReplyEnabled: true,
       increaseReplyVolume: false,
-      reason: 'Downstream profile/click/CV signals are not yet locally measurable; keep experimentation conservative.'
+      reason: accountInsights.available
+        ? 'Threads profile/click insights are available; keep conservative volume until multiple days are collected.'
+        : 'Threads insights unavailable or permission missing; keep unknown values unknown and continue conservative experimentation.'
     }
   };
 
@@ -83,7 +168,7 @@ function updateEnv(values) {
   const changed = [];
   for (const [key, value] of Object.entries(values)) {
     const line = `${key}=${value}`;
-    const re = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=.*$`, 'm');
+    const re = new RegExp(`^${escapeRegex(key)}=.*$`, 'm');
     const old = (text.match(re) || [null])[0];
     if (old === line) continue;
     if (re.test(text)) text = text.replace(re, line);
@@ -99,8 +184,9 @@ function recentReports(limit = 3) {
   return fs.readdirSync(reportsDir).filter(x => /-night\.json$/.test(x)).sort().reverse().slice(0, limit).map(x => readJson(path.join(reportsDir, x), null)).filter(Boolean);
 }
 
-function runDailyCommander() {
-  const latest = readJson(path.join(dataDir, 'latest-night-evaluation.json'), null) || buildNightReport();
+async function runDailyCommander() {
+  let latest = readJson(path.join(dataDir, 'latest-night-evaluation.json'), null);
+  if (!latest) latest = await buildNightReport();
   const history = recentReports(3);
   const current = readJson(stateFile, {});
 
@@ -112,6 +198,9 @@ function runDailyCommander() {
   const recentFailures = history.reduce((n, r) => n + Number(r?.actuals?.externalRepliesFailed || 0), 0);
   const candidateCount = Number(latest?.actuals?.latestCandidateCount || current.lastCandidateCount || 0);
   const eligibleCount = Number(latest?.actuals?.latestEligibleCount || current.lastEligibleReplyCount || 0);
+  const insightReports = history.filter(r => r?.threadsInsights?.account?.available);
+  const clicks = insightReports.reduce((n, r) => n + (Number.isFinite(r?.funnel?.linkClicks) ? r.funnel.linkClicks : 0), 0);
+  const profileViews = insightReports.reduce((n, r) => n + (Number.isFinite(r?.funnel?.profileViews) ? r.funnel.profileViews : 0), 0);
 
   if (recentFailures > 0 || current.browserOk === false) {
     maxReplies = 2;
@@ -121,14 +210,22 @@ function runDailyCommander() {
     minScore = 40;
     queries = '家事,時短,収納,掃除,献立';
     reasons.push('Candidate supply is low: broaden discovery while keeping daily cap fixed.');
+  } else if (insightReports.length >= 3 && clicks > 0 && candidateCount >= 20 && eligibleCount >= 3) {
+    maxReplies = 4;
+    minScore = 45;
+    reasons.push('Three-day Threads insights show link clicks with healthy candidate supply: allow a controlled increase to 4 replies/day.');
+  } else if (insightReports.length >= 3 && profileViews > 0 && clicks === 0) {
+    maxReplies = 3;
+    minScore = 50;
+    reasons.push('Profile views exist but link clicks are zero: improve traffic quality before increasing reply volume.');
   } else if (candidateCount >= 20 && eligibleCount >= 3) {
-    reasons.push('Candidate supply is healthy: keep conservative 3/day cap until downstream funnel metrics are measurable.');
+    reasons.push('Candidate supply is healthy: keep 3/day until downstream signal is mature.');
   } else {
     reasons.push('Keep baseline policy while gathering more observations.');
   }
 
   const strategy = {
-    version: 'm8-daily-commander-v1',
+    version: 'm8-daily-commander-v2',
     generatedAt: new Date().toISOString(),
     jstDate: dayKey(),
     mode: latest.status === 'CAUTION' ? 'CAUTION' : 'NORMAL',
@@ -139,10 +236,15 @@ function runDailyCommander() {
       CFE_MAX_POSTS_PER_DAY: 3,
       CFE_POST_SLOTS: '07:30,12:30,19:30'
     },
+    observed: {
+      reportsWithThreadsInsights: insightReports.length,
+      threeDayProfileViews: insightReports.length ? profileViews : 'unknown',
+      threeDayLinkClicks: insightReports.length ? clicks : 'unknown'
+    },
     constraints: {
-      noAutomaticVolumeIncreaseWithoutDownstreamMetrics: true,
       unknownMetricsAreNotZero: true,
-      maxExternalRepliesHardLimit: 5
+      maxExternalRepliesHardLimit: 5,
+      requireThreeDaysOfInsightsBeforeIncreasingReplyVolume: true
     },
     reasons
   };
@@ -157,9 +259,9 @@ function runDailyCommander() {
 
 const mode = process.argv[2] || '';
 if (mode === 'night-eval') {
-  console.log(JSON.stringify(buildNightReport(), null, 2));
+  console.log(JSON.stringify(await buildNightReport(), null, 2));
 } else if (mode === 'daily-commander') {
-  console.log(JSON.stringify(runDailyCommander(), null, 2));
+  console.log(JSON.stringify(await runDailyCommander(), null, 2));
 } else {
   console.error('Usage: node src/operations-agent.js night-eval|daily-commander');
   process.exit(2);
