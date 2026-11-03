@@ -1,11 +1,11 @@
 {
   "name": "cashflowengine-m8-agent-node",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/agent.js",
-    "check": "node --check src/agent.js"
+    "start": "node --env-file=.env src/local-core.js",
+    "check": "node --check src/local-core.js"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
