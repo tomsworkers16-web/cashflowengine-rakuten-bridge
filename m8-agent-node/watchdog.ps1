@@ -7,7 +7,30 @@ $healthy = $false
 
 try {
   $r = Invoke-RestMethod -Uri 'http://127.0.0.1:18787/health' -TimeoutSec 8
-  if ($r.ok -eq $true) { $healthy = $true }
+  if ($r.ok -eq $true) {
+    $healthy = $true
+
+    # When External Reply is enabled, browser worker health is part of service health.
+    if ($r.externalReply -and $r.externalReply.enabled -eq $true) {
+      if ($r.externalReply.browserOk -ne $true) { $healthy = $false }
+
+      $lastScan = $r.state.lastThreadsScanAt
+      if ($lastScan) {
+        try {
+          $ageMinutes = ((Get-Date) - ([DateTimeOffset]::Parse($lastScan)).LocalDateTime).TotalMinutes
+          if ($ageMinutes -gt 75) { $healthy = $false }
+        } catch { $healthy = $false }
+      } else {
+        $started = $r.state.startedAt
+        if ($started) {
+          try {
+            $uptimeMinutes = ((Get-Date) - ([DateTimeOffset]::Parse($started)).LocalDateTime).TotalMinutes
+            if ($uptimeMinutes -gt 10) { $healthy = $false }
+          } catch {}
+        }
+      }
+    }
+  }
 } catch {}
 
 if (-not $healthy) {
@@ -22,9 +45,8 @@ if (-not $healthy) {
     Remove-Item $pidFile -ErrorAction SilentlyContinue
   }
 
-  # Catch any stale/orphan local-core Node process even when its command line uses a relative path.
   Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object {
-    $_.CommandLine -and $_.CommandLine -like '*local-core.js*'
+    $_.CommandLine -and $_.CommandLine -like '*local-core*.js*'
   } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
   }
