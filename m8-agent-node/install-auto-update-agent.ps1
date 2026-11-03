@@ -18,6 +18,12 @@ $cmd = '"' + $ps + '" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Fi
 schtasks.exe /Create /TN $task /SC MINUTE /MO 5 /TR $cmd /RL HIGHEST /F | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Failed to register Auto Update scheduled task.' }
 
+$opsInstaller = Join-Path $root 'install-operations-agents.ps1'
+if (Test-Path $opsInstaller) {
+  & $opsInstaller
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to install M8 operations agents.' }
+}
+
 Start-ScheduledTask -TaskName $task
 Start-Sleep -Seconds 3
 
@@ -27,3 +33,4 @@ $info | Format-Table -AutoSize
 Write-Host 'Check interval: every 5 minutes'
 Write-Host 'Safety: fast-forward only, clean tracked worktree required, JS syntax preflight, health verification, automatic rollback'
 Write-Host 'Log: .data\auto-update-agent.log'
+if (Test-Path $opsInstaller) { Write-Host 'Night Evaluation and Daily Commander are also installed.' }
