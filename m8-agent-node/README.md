@@ -1,76 +1,121 @@
 # Cash Flow Engine M8 Agent Node
 
-GMKtec M8 を Cash Flow Engine 専用の常時稼働 Agent Node として使うための実行基盤です。
+GMKtec M8 (`AI-FACTORY-NODE01`) を Cash Flow Engine #001 の常時稼働ローカルAgent Nodeとして使う実行基盤です。
 
-## 目的
+## 正本アーキテクチャ
 
-- メインPC非依存で24時間稼働
-- TinyFish等の従量課金ブラウザを原則不要にする
-- Threadsのログイン済みChromeを永続保持
-- External Reply Discoveryの読み取り専用ブラウザ実行
-- 将来のA8/楽天/市場調査/競合調査Agentの共通実行基盤
+- ChatGPT: 戦略判断・コード修正・例外対応
+- M8 Local Core v2: Threads通常投稿、楽天商品選定、外部投稿探索、自動返信、ローカル状態管理
+- Watchdog: Local Core / Browser異常の自己修復
+- Auto Update Agent: GitHub更新の安全な自動反映、構文検証、Health確認、失敗時ロールバック
+- Night Evaluation Agent: 毎日22:30 JSTに当日実績・エラー・返信状況を評価
+- Daily Commander Agent: 毎日06:30 JSTに翌日の運用パラメータを安全範囲内で調整
 
-## 安全原則
+通常運用はRender、TinyFish、Supabase、GitHub Actionsを必要としません。Meta Threads公式APIと楽天APIはM8から直接使用します。
 
-- Threads外部投稿への返信はM8から自動送信しない
-- Like / Follow / Repost / Reply / Postは禁止
-- M8は発見・読み取り・候補送信まで
-- 最終返信はChatGPT通知後に人間が送信
-- Bridgeとの通信は共有Secretで認証
+## 自動運用
 
-## 構成
+### Local Core v2
 
-M8 Windows 11
-→ Google Chrome + Playwright
-→ 永続Threads profile
-→ m8-agent-node
-→ Render Bridge
-→ ChatGPT External Reply Discovery
-→ ユーザー通知
+- 投稿枠: 07:30 / 12:30 / 19:30 JST
+- 投稿上限: 3本/日
+- Growth / Revenue / Trustを分けて投稿
+- Revenue投稿では楽天APIから候補商品を選定
+- Threadsブラウザ探索はPlaywright + 永続Chrome profile
 
-## 実機が手元に戻ったら
+### External Reply Engine v1
 
-1. Windows Updateを完了
-2. Google Chromeをインストール
-3. Node.js LTSをインストール
-4. このリポジトリを取得
-5. `m8-agent-node` フォルダで PowerShell を管理者として開く
-6. `./setup.ps1` を実行
-7. `.env` にBridge側と同じ `CFE_M8_SHARED_SECRET` を設定
-8. `npm start`
-9. 開いたChromeでThreadsへ `rakumitsu_select` として1回ログイン
-10. Bridgeの `/automation/external-reply-node/status` で heartbeat を確認
-11. 候補取得テスト後、External Reply Discovery Automationを再開
+- ホーム + 複数検索語から外部投稿候補を探索
+- 関連性・質問・悩み・テーマ一致をスコアリング
+- 広告/アフィリエイト、センシティブ、自投稿、URL付き投稿等を除外
+- 初期上限3返信/日
+- URLなし・直接販売誘導なしの自然な返信
+- 同一投稿への重複返信禁止
+- 同一相手への当日複数返信禁止
+- 実績は `.data/external-replies.jsonl` に保存
 
-## 常時稼働設定
+### Night Evaluation Agent
 
-- Windows: スリープなし
-- 電源復旧後: BIOSでPower On after AC lossを有効化推奨
-- Windows専用ローカルユーザーで自動ログオンを検討
-- Agentはタスクスケジューラでログオン時自動起動
-- Chrome profileは `m8-agent-node/.data/threads-profile`
+22:30 JSTに以下をローカル集計します。
+
+- 投稿数 / role別投稿数
+- 外部返信成功 / 失敗
+- 候補数 / eligible数
+- Browser / Threads scan状態
+- POST_ERROR等の障害
+- Profile Views / Click / CV / Profitなど未取得指標は `unknown` とし、0扱いしない
+
+出力: `.data/reports/YYYY-MM-DD-night.json`
+
+### Daily Commander Agent
+
+06:30 JSTに直近評価を読み、次の範囲だけ自動調整します。
+
+- 外部返信上限
+- 最低スコア
+- Threads探索キーワード
+- 投稿上限 / 投稿時刻は原則3本・3枠を維持
+
+Browser/返信失敗時は件数を減らし閾値を上げます。候補不足時は探索を広げます。Profile→Click→CV→Profitが測定できない段階では返信量を自動増加させません。
+
+### Watchdog
+
+5分ごとにHealthとBrowser状態を確認し、異常時にLocal Coreを再起動します。
+
+### Auto Update Agent
+
+5分ごとにGitHub `main` を確認します。
+
+- clean tracked worktree必須
+- fast-forward only
+- 更新前に全JSを `node --check`
+- 更新後Local Core再起動 + `/health`確認
+- Health失敗時は旧commitへ自動ロールバック
+- `.env` / `.data` はGit管理対象外
+- 新しいOperations Agentタスクも自動登録
+
+## セットアップ / 復旧
+
+管理者PowerShell:
+
+```powershell
+cd C:\AI-Factory\cashflowengine-rakuten-bridge\m8-agent-node
+npm install
+Set-ExecutionPolicy -Scope Process Bypass
+.\configure-server-mode.ps1
+```
+
+Auto Update Agentだけ未登録の場合:
+
+```powershell
+.\install-auto-update-agent.ps1
+```
+
+これによりNight Evaluation / Daily Commanderも同時登録されます。
 
 ## 正常基準
 
-Bridge `/automation/external-reply-context`
-- version: `external-reply-v2-m8`
-- discoverySource: `m8_agent_node`
-- browserRuntime.provider: `gmktec_m8_playwright`
-- selfTest.passed: `true`
+`http://127.0.0.1:18787/health`
 
-Bridge `/automation/external-reply-node/status`
-- sharedSecretConfigured: `true`
-- nodeState.lastStatus: `healthy`
-- nodeState.lastHeartbeat: 直近
+- `ok: true`
+- `state.version: m8-local-core-v2`
+- `threads.ok: true`
+- `autoPostEnabled: true`
+- `externalReply.enabled: true`
+- `externalReply.browserOk: true`
 
-## 将来拡張
+Scheduled Tasks:
 
-同じM8へ追加可能:
-- A8案件探索Agent
-- 楽天商品調査Agent
-- Market Intelligence Agent
-- 競合調査Agent
-- SNSトレンド探索Agent
-- 定期ブラウザ監視Agent
+- `CashFlowEngine-M8-LocalCore` = Running
+- `CashFlowEngine-M8-Watchdog` = Ready（5分周期）
+- `CashFlowEngine-M8-AutoUpdate` = Ready（5分周期）
+- `CashFlowEngine-M8-NightEvaluation` = Ready（22:30）
+- `CashFlowEngine-M8-DailyCommander` = Ready（06:30）
 
-ブラウザ書き込み操作は各Agentごとに明示許可制とし、デフォルトはread-onlyとします。
+## 重要な安全原則
+
+- Secretは `.env` のみに保存し、ChatGPTやGitHubへ貼らない
+- Auto Update Agentは非fast-forwardやローカル変更がある場合は自動更新しない
+- 日次司令塔は事業戦略全体を勝手に変更せず、定めた安全範囲だけ調整する
+- クリック/CV/利益の未計測値を0として評価しない
+- 外部返信数は、下流成果が測定できるまで保守的に維持する
