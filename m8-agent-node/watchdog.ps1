@@ -22,8 +22,9 @@ if (-not $healthy) {
     Remove-Item $pidFile -ErrorAction SilentlyContinue
   }
 
+  # Catch any stale/orphan local-core Node process even when its command line uses a relative path.
   Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object {
-    $_.CommandLine -and $_.CommandLine -like '*m8-agent-node*local-core.js*'
+    $_.CommandLine -and $_.CommandLine -like '*local-core.js*'
   } | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
   }
