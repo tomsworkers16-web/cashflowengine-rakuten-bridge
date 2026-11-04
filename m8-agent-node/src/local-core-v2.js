@@ -5,7 +5,7 @@ import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText } from './product-posting.js';
-import { renderProductCard, publishImageBrowser } from './image-card.js';
+import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -155,14 +155,19 @@ function itemScore(i) {
   if (/^https?:\/\//.test(i.affiliateUrl)) s += 5;
   return s;
 }
-async function rakutenBest(keyword, excluded = new Set()) {
+async function rakutenBest(keyword, excluded = new Set(), role = 'discovery') {
   if (!RAKUTEN_APPLICATION_ID || !RAKUTEN_ACCESS_KEY || !RAKUTEN_AFFILIATE_ID) throw new Error('rakuten_credentials_missing');
   const q = new URLSearchParams({ applicationId: RAKUTEN_APPLICATION_ID, accessKey: RAKUTEN_ACCESS_KEY, affiliateId: RAKUTEN_AFFILIATE_ID, keyword, format: 'json', hits: '20', sort: '-reviewCount', availability: '1', imageFlag: '1' });
   const data = await fetchJson(`${RAKUTEN_API_BASE}?${q}`, { attempts: 2 });
   const items = (data.Items || data.items || []).map(normalizeItem)
     .filter(i => i.itemName && i.itemCode && i.price > 0 && /^https:\/\//.test(i.affiliateUrl))
     .sort((a, b) => itemScore(b) - itemScore(a));
-  return items.find(i => !excluded.has(i.itemCode)) || null;
+  const candidates = items.filter(i => !excluded.has(i.itemCode));
+  if (IMAGE_CARD_ENABLED) {
+    const licensed = candidates.find(i => approvedImageFor(i, DATA_DIR, { hasAffiliateLink: role === 'revenue' }));
+    if (licensed) return licensed;
+  }
+  return candidates[0] || null;
 }
 
 function recentlyFeaturedItems() {
@@ -193,7 +198,7 @@ async function postFor(slot, { catchup = false } = {}) {
     const kw = KEYWORDS[(keywordBase + attempt) % KEYWORDS.length];
     try {
       state.lastRakutenKeyword = kw;
-      const item = await rakutenBest(kw, used);
+      const item = await rakutenBest(kw, used, role);
       if (!item) continue;
       text = role === 'revenue' ? revenueText(item) : editorialText(item, role);
       if (text) {
