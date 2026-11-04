@@ -10,7 +10,8 @@ const base = env.RAKUTEN_API_BASE || 'https://openapi.rakuten.co.jp/ichibams/api
 const appId = env.RAKUTEN_APPLICATION_ID || '';
 const accessKey = env.RAKUTEN_ACCESS_KEY || '';
 const affiliateId = env.RAKUTEN_AFFILIATE_ID || '';
-const keyword = process.argv.slice(2).join(' ') || 'キッチン 便利グッズ';
+const userQuery = process.argv.slice(2).join(' ') || 'キッチン 便利グッズ';
+const itemCode = /^[a-zA-Z0-9_-]+:[a-zA-Z0-9_-]+$/.test(userQuery) ? userQuery : null;
 const chromePaths = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'
@@ -20,9 +21,11 @@ if (!executablePath) throw new Error('chrome_not_found');
 if (!appId || !accessKey || !affiliateId) throw new Error('rakuten_credentials_missing');
 
 const q = new URLSearchParams({
-  applicationId: appId, accessKey, affiliateId, keyword, hits: '10',
+  applicationId: appId, accessKey, affiliateId, hits: '20',
   format: 'json', availability: '1', imageFlag: '1'
 });
+if (itemCode) q.set('itemCode', itemCode);
+else q.set('keyword', userQuery);
 const response = await fetch(base + '?' + q, { signal: AbortSignal.timeout(15000) });
 if (!response.ok) throw new Error('rakuten_http_' + response.status);
 const result = await response.json();
