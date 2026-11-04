@@ -3,68 +3,88 @@ import path from 'node:path';
 import { cleanProductName } from './product-posting.js';
 
 const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const cleanUrl = (s) => {
-  try {
-    const u = new URL(typeof s === 'string' ? s : s?.imageUrl || s?.url || '');
-    if (u.protocol !== 'https:' || !/(\.|^)rakuten\.co\.jp$|(\.|^)rakuten\.ne\.jp$|(\.|^)rakuten\.com$/i.test(u.hostname)) return '';
-    return u.toString();
-  } catch { return ''; }
-};
+const MIN_SOURCE_PX = 600;
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
-export function getProductImage(item) {
-  const urls = [...(item?.mediumImageUrls || []), ...(item?.smallImageUrls || [])];
-  for (const entry of urls) {
-    const url = cleanUrl(entry);
-    if (url) return url;
-  }
-  return '';
+// Local opt-in manifest only. API thumbnails and unauthorised Rakuten product-page scraping are NOT image licences.
+// For affiliate link creator images: caller must publish the associated Rakuten affiliate link.
+export function approvedImageFor(item, dataDir, { hasAffiliateLink = false } = {}) {
+  const code = String(item?.itemCode || '');
+  if (!code) return null;
+  const base = path.resolve(dataDir, 'approved-product-images');
+  const manifestPath = path.join(base, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) return null;
+  let entries;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    entries = Array.isArray(parsed) ? parsed : parsed.items;
+  } catch { return null; }
+  if (!Array.isArray(entries)) return null;
+  const entry = entries.find(x => x?.itemCode === code && x?.approved === true);
+  if (!entry) return null;
+  const source = String(entry.source || '');
+  if (source !== 'rights_holder_permission' && source !== 'rakuten_affiliate_link_creator') return null;
+  if (source === 'rakuten_affiliate_link_creator' && !hasAffiliateLink) return null;
+  if (!entry.permissionReference || !String(entry.permissionReference).trim()) return null;
+  const name = String(entry.filename || '');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,160}\.(png|jpg|jpeg)$/i.test(name)) return null;
+  const filename = path.resolve(base, name);
+  if (path.dirname(filename) !== base || !fs.existsSync(filename)) return null;
+  const stat = fs.statSync(filename);
+  if (!stat.isFile() || stat.size > MAX_FILE_BYTES || stat.size < 1000) return null;
+  const ext = path.extname(filename).toLowerCase();
+  return { path: filename, mime: ext === '.png' ? 'image/png' : 'image/jpeg', source };
 }
 
-export async function renderProductCard(context, item, role, dataDir) {
-  const url = getProductImage(item);
-  if (!url) throw new Error('no_approved_rakuten_image_url');
-  const name = cleanProductName(item?.itemName);
-  if (!name) throw new Error('missing_product_name');
+export async function renderProductCard(context, item, role, dataDir, opts = {}) {
+  const asset = approvedImageFor(item, dataDir, opts);
+  if (!asset) throw new Error('no_licensed_high_resolution_image_for_item');
+  const imageData = fs.readFileSync(asset.path);
+  const dataUrl = 'data:' + asset.mime + ';base64,' + imageData.toString('base64');
+  const original = cleanProductName(item?.itemName);
+  if (!original) throw new Error('missing_product_name');
+  const name = original.length > 34 ? original.slice(0, 33) + '…' : original;
   const headline = role === 'comparison' ? '選ぶ前に、ここをチェック' : 'こんなの見つけた！';
-  const subtitle = role === 'comparison' ? 'SIZE  /  CARE  /  STORAGE' : '暮らしの気になるアイテム';
+  const subtitle = role === 'comparison' ? 'SIZE / CARE / STORAGE' : '暮らしの気になるアイテム';
   const price = Number(item?.price) > 0 ? '約 ' + Number(item.price).toLocaleString('ja-JP') + ' 円' : '価格は商品ページで確認';
   const count = Number(item?.reviewCount);
   const reviews = count > 0 ? 'レビュー ' + count.toLocaleString('ja-JP') + ' 件' : '気になる一品';
-  const key = String(item?.itemCode || 'product').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(-48);
   const folder = path.join(dataDir, 'image-cards');
   fs.mkdirSync(folder, { recursive: true });
+  const key = String(item?.itemCode || 'product').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(-48);
   const filename = path.join(folder, [Date.now(), role, key].join('-') + '.png');
   const page = await context.newPage();
   try {
     await page.setViewportSize({ width: 1080, height: 1350 });
     const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
-      *{box-sizing:border-box} body{margin:0;background:#f5f0e7;color:#25382e;font-family:"Yu Gothic","Meiryo",Arial,sans-serif}
-      .paper{width:1080px;height:1350px;padding:62px 78px;position:relative;background:#f8f4ec}
-      .top{font-size:28px;letter-spacing:6px;font-weight:800;border-bottom:2px solid #283e33;padding-bottom:19px}
-      .eyebrow{font-size:23px;letter-spacing:2px;margin-top:52px;color:#68786b}
-      .headline{font-size:61px;font-weight:800;margin:12px 0 36px;line-height:1.25}
-      .image-frame{height:660px;background:linear-gradient(145deg,#fff 0%,#f0f2ed 100%);border:1px solid #deded7;display:flex;align-items:center;justify-content:center;padding:26px;overflow:hidden;position:relative}
-      .image-frame:before{content:"";position:absolute;inset:40px;border:1px solid #e8eae4;pointer-events:none}
-      .image-frame img{display:block;width:100%;height:100%;object-fit:contain;image-rendering:auto;position:relative;z-index:1}
-      .image-hint{position:absolute;z-index:2;bottom:15px;right:22px;font-size:14px;color:#7b867c;background:rgba(255,255,255,.87);padding:6px 10px}
-      .label{margin-top:27px;font-size:28px;font-weight:800;line-height:1.5;max-height:110px;overflow:hidden}
-      .row{display:flex;justify-content:space-between;align-items:center;margin-top:16px}
-      .price{font-size:36px;font-weight:800}.reviews{font-size:22px}
-      .footer{position:absolute;bottom:30px;left:78px;right:78px;border-top:1px solid #87968a;padding-top:15px;font-size:16px;color:#58675c;display:flex;justify-content:space-between}
+      *{box-sizing:border-box}
+      body{margin:0;background:#f6f3ec;color:#283d33;font-family:"Yu Gothic","Meiryo",Arial,sans-serif}
+      .paper{width:1080px;height:1350px;padding:62px 74px;position:relative;background:#f8f5ed}
+      .top{font-size:27px;letter-spacing:5px;font-weight:800;border-bottom:2px solid #283d33;padding-bottom:19px}
+      .eyebrow{font-size:22px;letter-spacing:3px;margin-top:35px;color:#667669}
+      .headline{font-size:57px;font-weight:800;margin:12px 0 29px;line-height:1.2}
+      .image-frame{height:705px;background:#fff;border:1px solid #e2e6de;display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
+      .image-frame img{width:100%;height:100%;object-fit:contain;display:block}
+      .label{margin-top:24px;font-size:32px;font-weight:800;line-height:1.42;max-height:94px;overflow:hidden}
+      .row{display:flex;justify-content:space-between;align-items:center;margin-top:17px}
+      .price{font-size:39px;font-weight:800}.reviews{font-size:22px}
+      .footer{position:absolute;bottom:32px;left:74px;right:74px;border-top:1px solid #91a296;padding-top:16px;font-size:15px;color:#617064;display:flex;justify-content:space-between}
     </style></head><body><div class="paper"><div class="top">RAKUMITSU SELECT</div>
       <div class="eyebrow">${esc(subtitle)}</div><div class="headline">${esc(headline)}</div>
-      <div class="image-frame"><img id="product" src="${esc(url)}" referrerpolicy="no-referrer"/><span class="image-hint">商品イメージ</span></div>
+      <div class="image-frame"><img id="product" src="${dataUrl}"/></div>
       <div class="label">${esc(name)}</div><div class="row"><span class="price">${esc(price)}</span><span class="reviews">${esc(reviews)}</span></div>
-      <div class="footer"><span>商品画像：楽天市場掲載商品</span><span>価格・情報は取得時点 / 購入前に再確認</span></div>
+      <div class="footer"><span>商品画像は提供元の利用条件に基づき掲載</span><span>価格・情報は取得時点 / 購入前に確認</span></div>
     </div></body></html>`;
     await page.setContent(html, { waitUntil: 'load', timeout: 25000 });
-    const loaded = await page.locator('#product').evaluate(img => img.complete && img.naturalWidth >= 64 && img.naturalHeight >= 64);
-    if (!loaded) throw new Error('product_image_not_loaded');
+    const dimensions = await page.locator('#product').evaluate(img => ({
+      loaded: img.complete && img.naturalWidth > 0, width: img.naturalWidth, height: img.naturalHeight
+    }));
+    if (!dimensions.loaded || Math.min(dimensions.width, dimensions.height) < MIN_SOURCE_PX)
+      throw new Error('source_image_below_600px_minimum');
     await page.screenshot({ path: filename, animations: 'disabled', timeout: 15000 });
-    return { path: filename, template: role === 'comparison' ? 'compare-v2' : 'discover-v2', sourceImageUrl: url };
-  } finally {
-    await page.close().catch(() => {});
-  }
+    return { path: filename, template: role === 'comparison' ? 'compare-v3' : 'discover-v3',
+      sourceImagePath: asset.path, sourceWidth: dimensions.width, sourceHeight: dimensions.height };
+  } finally { await page.close().catch(() => {}); }
 }
 
 // Browser write is deliberately feature-gated: selectors need verification on the M8 profile.
