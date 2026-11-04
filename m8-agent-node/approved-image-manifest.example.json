@@ -1,0 +1,11 @@
+{
+  "items": [
+    {
+      "itemCode": "REPLACE_WITH_REAL_RAKUTEN_ITEM_CODE",
+      "filename": "approved-product-photo.jpg",
+      "approved": false,
+      "source": "rights_holder_permission",
+      "permissionReference": "REPLACE_WITH_WRITTEN_RIGHTS_HOLDER_PERMISSION_REFERENCE"
+    }
+  ]
+}
