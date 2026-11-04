@@ -45,7 +45,15 @@ try {
       const approved = approvedImageFor(item, dataDir, { hasAffiliateLink: linked });
       const role = approved?.source === 'rakuten_affiliate_link_creator' && linked ? 'revenue' : 'discovery';
       const card = await renderProductCard(context, item, role, dataDir, { hasAffiliateLink: linked && role === 'revenue' });
-      console.log(JSON.stringify({ ok: true, imagePath: card.path, template: card.template, itemCode: i.itemCode }, null, 2));
+      console.log(JSON.stringify({
+        ok: true,
+        imagePath: card.path,
+        template: card.template,
+        itemCode: i.itemCode,
+        productPhotoIncluded: Boolean(card.sourceImagePath),
+        publicationAttempted: false,
+        note: card.sourceImagePath ? 'approved_image_rendered' : 'editorial_text_only_no_product_photo'
+      }, null, 2));
       done = true;
       break;
     } catch (error) {

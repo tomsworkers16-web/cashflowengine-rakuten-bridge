@@ -25,7 +25,13 @@ export function approvedImageFor(item, dataDir, { hasAffiliateLink = false } = {
   if (!entry) return null;
   const source = String(entry.source || '');
   if (source !== 'rights_holder_permission' && source !== 'rakuten_affiliate_link_creator') return null;
-  if (source === 'rakuten_affiliate_link_creator' && !hasAffiliateLink) return null;
+  // A registration checkbox does not establish permission to republish or modify a
+  // third-party photo. Keep affiliate-link-creator assets disabled for publication
+  // until a separate rights review has been completed for the workflow.
+  if (source === 'rakuten_affiliate_link_creator') {
+    if (!hasAffiliateLink) return null;
+    if (process.env.CFE_RAKUTEN_IMAGE_PUBLICATION_ENABLED !== 'true') return null;
+  }
   if (!entry.permissionReference || !String(entry.permissionReference).trim()) return null;
   const name = String(entry.filename || '');
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,160}\.(png|jpg|jpeg)$/i.test(name)) return null;
