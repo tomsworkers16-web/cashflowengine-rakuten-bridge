@@ -3,7 +3,8 @@ import path from 'node:path';
 import { cleanProductName } from './product-posting.js';
 
 const esc = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const MIN_SOURCE_PX = 600;
+const MIN_RIGHTS_HOLDER_PX = 600;
+const MIN_AFFILIATE_PX = 400;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 // Local opt-in manifest only. API thumbnails and unauthorised Rakuten product-page scraping are NOT image licences.
@@ -64,7 +65,7 @@ export async function renderProductCard(context, item, role, dataDir, opts = {})
       .eyebrow{font-size:22px;letter-spacing:3px;margin-top:35px;color:#667669}
       .headline{font-size:57px;font-weight:800;margin:12px 0 29px;line-height:1.2}
       .image-frame{height:705px;background:#fff;border:1px solid #e2e6de;display:flex;align-items:center;justify-content:center;padding:16px;overflow:hidden}
-      .image-frame img{width:100%;height:100%;object-fit:contain;display:block}
+      .image-frame img{width:min(100%,500px);height:auto;max-height:570px;object-fit:contain;display:block}
       .label{margin-top:24px;font-size:32px;font-weight:800;line-height:1.42;max-height:94px;overflow:hidden}
       .row{display:flex;justify-content:space-between;align-items:center;margin-top:17px}
       .price{font-size:39px;font-weight:800}.reviews{font-size:22px}
@@ -79,8 +80,9 @@ export async function renderProductCard(context, item, role, dataDir, opts = {})
     const dimensions = await page.locator('#product').evaluate(img => ({
       loaded: img.complete && img.naturalWidth > 0, width: img.naturalWidth, height: img.naturalHeight
     }));
-    if (!dimensions.loaded || Math.min(dimensions.width, dimensions.height) < MIN_SOURCE_PX)
-      throw new Error('source_image_below_600px_minimum');
+    const minimum = asset.source === 'rakuten_affiliate_link_creator' ? MIN_AFFILIATE_PX : MIN_RIGHTS_HOLDER_PX;
+    if (!dimensions.loaded || Math.min(dimensions.width, dimensions.height) < minimum)
+      throw new Error('source_image_below_' + minimum + 'px_minimum');
     await page.screenshot({ path: filename, animations: 'disabled', timeout: 15000 });
     return { path: filename, template: role === 'comparison' ? 'compare-v3' : 'discover-v3',
       sourceImagePath: asset.path, sourceWidth: dimensions.width, sourceHeight: dimensions.height };
