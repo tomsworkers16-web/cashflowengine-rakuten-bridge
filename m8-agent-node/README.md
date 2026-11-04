@@ -210,6 +210,12 @@ npm.cmd run image-admin
 
 画像登録はThreadsへ投稿しません。画像付き自動投稿は、依然として `CFE_IMAGE_POST_ENABLED=false` です。本番投稿までの検証は別工程です。
 
+登録後は商品コードを指定すれば、その商品を直接取得してプレビューできます。例えば、商品コードが `shop:12345` の場合：
+
+```powershell
+npm.cmd run preview-image -- "shop:12345"
+```
+
 登録後の画像プレビュー（投稿はされません）：
 
 ```powershell
