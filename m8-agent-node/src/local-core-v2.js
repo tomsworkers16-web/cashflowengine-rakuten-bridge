@@ -220,9 +220,9 @@ async function postFor(slot, { catchup = false } = {}) {
   }
   let id = null;
   let imageCard = null;
-  if (IMAGE_CARD_ENABLED && chosenItem && role !== 'revenue' && imageBrowserContext) {
+  if (IMAGE_CARD_ENABLED && chosenItem && imageBrowserContext) {
     try {
-      imageCard = await renderProductCard(imageBrowserContext, chosenItem, role, DATA_DIR);
+      imageCard = await renderProductCard(imageBrowserContext, chosenItem, role, DATA_DIR, { hasAffiliateLink: role === 'revenue' });
       state.lastImageTemplate = imageCard.template;
       state.lastImagePostResult = 'card_generated';
       state.lastImagePostError = null;
@@ -423,7 +423,7 @@ http.createServer(async (req, res) => {
   res.statusCode = 404; res.end(JSON.stringify({ error: 'not_found' }));
 }).listen(PORT, '127.0.0.1', () => event('LOCAL_API_STARTED', { url: `http://127.0.0.1:${PORT}` }));
 
-state.version = 'm8-local-core-v2-image-card-v1';
+state.version = 'm8-local-core-v2-image-card-v3';
 state.startedAt = new Date().toISOString();
 saveState();
 event('M8_LOCAL_CORE_STARTED', { version: state.version, slots: SLOTS, autoPostEnabled: AUTO_POST_ENABLED, externalReplyEnabled: EXTERNAL_REPLY_ENABLED });
