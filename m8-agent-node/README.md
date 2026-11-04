@@ -99,7 +99,7 @@ Auto Update Agentだけ未登録の場合:
 `http://127.0.0.1:18787/health`
 
 - `ok: true`
-- `state.version: m8-local-core-v2-image-card-v1`
+- `state.version: m8-local-core-v2-image-card-v3`
 - `threads.ok: true`
 - `autoPostEnabled: true`
 - `externalReply.enabled: true`
@@ -124,7 +124,7 @@ Scheduled Tasks:
 ## 画像カード v1（実装・段階適用）
 
 - 生成モジュール: `src/image-card.js`
-- 商品画像は楽天市場商品検索APIの `mediumImageUrls` / `smallImageUrls` を使用。提供画像が最大128pxのため、カード内の拡大表示は画質上の制約があります。
+- 旧v1/v2では楽天APIのサムネイル画像を拡大していましたが、v3では使用を中止しました。
 - 出力: `.data/image-cards/*.png`（1080×1350、オリジナル雑誌風レイアウト）
 - `CFE_IMAGE_CARD_ENABLED=true` はカード生成（非PR商品発見・比較枠）をONにします。
 - `CFE_IMAGE_POST_ENABLED=false` は**画像投稿をまだ行わない安全な既定値**。カードだけ生成し、通常のテキスト投稿は継続します。
@@ -152,3 +152,36 @@ npm run preview-image
 4. Threads画面操作は別途テストした後にだけ `CFE_IMAGE_POST_ENABLED=true` へ変更して再起動。
 
 画像付き公開の本番成功は、実際にThreads上で確認できるまで未検証として扱います。
+
+## Image Card v3：画質と権利の両方を確認する（2026-11-04）
+
+楽天の商品検索APIの `mediumImageUrls` は128×128pxが標準で、1080pxのカードへ引き伸ばすと粗くなります。**v3はAPIの画像を合成素材に使わず**、許諾を確認して登録した600×600px以上の画像のみ使います。楽天商品ページの無断スクレイピング・画像URL書き換えによる高解像度取得は行いません。
+
+商品画像について、楽天アフィリエイトのガイドラインでは**リンク作成ページからのダウンロード画像**に限り条件付きでサイズ変更・画像外側の装飾が可能ですが、画像への直接文字追加、トリミング、特定の創作性がある画像の無許諾使用などに制限があります。商品によっては画像使用権者からの個別許可が必要です。
+
+M8のローカルに以下を用意します。
+
+```text
+m8-agent-node/.data/approved-product-images/
+  manifest.json
+  approved-product-photo.jpg
+```
+
+`manifest.json` の雛形はリポジトリの `approved-image-manifest.example.json` にあります。商品コード・ファイル名・許諾元・許諾参照を確認してから `approved:true` に変更します。
+
+- `source: rights_holder_permission`：権利者から個別許諾を受けた画像（許諾範囲内で非PR投稿にも利用可能）。
+- `source: rakuten_affiliate_link_creator`：楽天アフィリエイトのリンク作成ページから許される条件で取得した画像。**同じ投稿に該当商品のアフィリエイトリンクを記載するPR枠でのみ利用可能**。
+- 元画像の縦横どちらかが600px未満なら拒否。拡大補間による見かけのピクセル数増加は品質保証になりません。
+- 画像の切り抜きや上書き文字はしません（`object-fit: contain`）。商品名・価格・見出しは別領域。
+- 画像がない/許可不明/低解像度：カードを作らずテキスト投稿を続行。
+- 画像付きブラウザ公開はUI動作未検証のため、`CFE_IMAGE_POST_ENABLED=false` を維持。
+
+テストコマンド（**Threads投稿なし**）：
+
+```powershell
+cd C:\AI-Factory\cashflowengine-rakuten-bridge\m8-agent-node
+git pull
+npm.cmd run preview-image
+```
+
+許諾済み画像が未登録の場合 `ok:false`, `status:no_approved_high_resolution_image` と表示されるのが**正常**です。旧サムネイルの粗いカードは生成しません。
