@@ -185,3 +185,35 @@ npm.cmd run preview-image
 ```
 
 許諾済み画像が未登録の場合 `ok:false`, `status:no_approved_high_resolution_image` と表示されるのが**正常**です。旧サムネイルの粗いカードは生成しません。
+
+## Image Admin v1：M8ブラウザから許諾済み高画質素材を登録する
+
+M8でPowerShellを開き、以下を実行します。
+
+```powershell
+cd C:\AI-Factory\cashflowengine-rakuten-bridge\m8-agent-node
+git pull
+npm.cmd run image-admin
+```
+
+次に **M8自身のブラウザ**で `http://127.0.0.1:18788/` を開いてください。既存のLocal Coreポート18787には触れません。画像管理画面は、閉じたらPowerShellで Ctrl+C を押せば停止できます。
+
+画面から行えること：
+
+- 楽天APIで商品を検索し、商品コードを自動転記
+- 権利者からの個別許諾画像、または楽天アフィリエイトのリンク作成画面で条件内利用できる画像を選択
+- 許諾元・利用条件の参照・確認を入力し、明示的に登録
+- 元画像をJPEG/PNGヘッダから判定し、縦横とも600px以上、最大8MBに限定
+- `.data/approved-product-images/manifest.json` に登録し、原本画像をM8内に保存
+
+**許諾がない画像を登録しないでください。** 権利確認は自動証明ではなく、実際の利用条件を確認する必要があります。楽天アフィリエイトのリンク作成画面経由の画像は、同一投稿で該当商品のアフィリエイトリンクを利用するPR投稿に限定します。
+
+画像登録はThreadsへ投稿しません。画像付き自動投稿は、依然として `CFE_IMAGE_POST_ENABLED=false` です。本番投稿までの検証は別工程です。
+
+登録後の画像プレビュー（投稿はされません）：
+
+```powershell
+npm.cmd run preview-image
+```
+
+画像を登録しただけでは、プレビューの検索候補商品と一致しない場合があります。商品コードが一致する商品だけカード化します。
