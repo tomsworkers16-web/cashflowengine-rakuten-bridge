@@ -45,7 +45,14 @@ try {
       console.error('candidate_skipped:' + error.message);
     }
   }
-  if (!done) throw new Error('no_renderable_rakuten_product_image');
+  if (!done) {
+    console.log(JSON.stringify({
+      ok: false, status: 'no_approved_high_resolution_image',
+      reason: 'Only expressly approved >=600px images may be rendered. API thumbnails are excluded.',
+      manifest: path.join(dataDir, 'approved-product-images', 'manifest.json'),
+      threadsPosted: false
+    }, null, 2));
+  }
 } finally {
   await browser.close();
 }
