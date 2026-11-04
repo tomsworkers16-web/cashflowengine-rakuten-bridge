@@ -152,7 +152,7 @@ async function rakutenBest(keyword, excluded = new Set()) {
   const items = (data.Items || data.items || []).map(normalizeItem)
     .filter(i => i.itemName && i.itemCode && i.price > 0 && /^https:\/\//.test(i.affiliateUrl))
     .sort((a, b) => itemScore(b) - itemScore(a));
-  return items.find(i => !excluded.has(i.itemCode)) || items[0] || null;
+  return items.find(i => !excluded.has(i.itemCode)) || null;
 }
 
 function recentlyFeaturedItems() {
