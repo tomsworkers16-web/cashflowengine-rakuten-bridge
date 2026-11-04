@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
-import { renderProductCard } from './image-card.js';
+import { renderProductCard, approvedImageFor } from './image-card.js';
 
 const env = process.env;
 const root = process.cwd();
@@ -36,11 +36,15 @@ try {
   let done = false;
   for (const i of items) {
     try {
-      const card = await renderProductCard(context, {
+      const item = {
         itemName: i.itemName, itemCode: i.itemCode, price: i.itemPrice,
         reviewCount: i.reviewCount, mediumImageUrls: i.mediumImageUrls || [],
         smallImageUrls: i.smallImageUrls || []
-      }, 'discovery', dataDir);
+      };
+      const linked = /^https:\/\//.test(String(i.affiliateUrl || ''));
+      const approved = approvedImageFor(item, dataDir, { hasAffiliateLink: linked });
+      const role = approved?.source === 'rakuten_affiliate_link_creator' && linked ? 'revenue' : 'discovery';
+      const card = await renderProductCard(context, item, role, dataDir, { hasAffiliateLink: linked && role === 'revenue' });
       console.log(JSON.stringify({ ok: true, imagePath: card.path, template: card.template, itemCode: i.itemCode }, null, 2));
       done = true;
       break;
