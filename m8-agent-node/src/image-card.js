@@ -37,7 +37,7 @@ export async function renderProductCard(context, item, role, dataDir) {
   const page = await context.newPage();
   try {
     await page.setViewportSize({ width: 1080, height: 1350 });
-    const html = \`<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
+    const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
       *{box-sizing:border-box} body{margin:0;background:#f5f0e7;color:#25382e;font-family:"Yu Gothic","Meiryo",Arial,sans-serif}
       .paper{width:1080px;height:1350px;padding:62px 78px;position:relative;background:#f8f4ec}
       .top{font-size:28px;letter-spacing:6px;font-weight:800;border-bottom:2px solid #283e33;padding-bottom:19px}
@@ -50,11 +50,11 @@ export async function renderProductCard(context, item, role, dataDir) {
       .price{font-size:36px;font-weight:800}.reviews{font-size:22px}
       .footer{position:absolute;bottom:30px;left:78px;right:78px;border-top:1px solid #87968a;padding-top:15px;font-size:16px;color:#58675c;display:flex;justify-content:space-between}
     </style></head><body><div class="paper"><div class="top">RAKUMITSU SELECT</div>
-      <div class="eyebrow">\${esc(subtitle)}</div><div class="headline">\${esc(headline)}</div>
-      <div class="image-frame"><img id="product" src="\${esc(url)}" referrerpolicy="no-referrer"/></div>
-      <div class="label">\${esc(name)}</div><div class="row"><span class="price">\${esc(price)}</span><span class="reviews">\${esc(reviews)}</span></div>
+      <div class="eyebrow">${esc(subtitle)}</div><div class="headline">${esc(headline)}</div>
+      <div class="image-frame"><img id="product" src="${esc(url)}" referrerpolicy="no-referrer"/></div>
+      <div class="label">${esc(name)}</div><div class="row"><span class="price">${esc(price)}</span><span class="reviews">${esc(reviews)}</span></div>
       <div class="footer"><span>商品画像：楽天市場掲載商品</span><span>価格・情報は取得時点 / 購入前に再確認</span></div>
-    </div></body></html>\`;
+    </div></body></html>`;
     await page.setContent(html, { waitUntil: 'load', timeout: 25000 });
     const loaded = await page.locator('#product').evaluate(img => img.complete && img.naturalWidth > 0);
     if (!loaded) throw new Error('product_image_not_loaded');
