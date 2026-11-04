@@ -235,3 +235,22 @@ npm.cmd run preview-image
 - Threadsへの画像付き自動公開は `CFE_IMAGE_POST_ENABLED=false` を維持（実機で投稿操作を検証するまで変更しない）
 
 旧ドキュメントの「許諾済み画像がなければ `ok:false` で停止する」は v3 当初の挙動です。**今は写真なしのオリジナルカードを生成**します。
+
+## 公式400px商品画像対応（2026-11-04）
+
+楽天市場商品検索APIは64px/128px画像のみ（公式APIドキュメント）。楽天アフィリエイト公式リンク作成画面は400×400、300×300等を選択可能です。
+
+参照先：
+- https://webservice.rakuten.co.jp/documentation/ichiba-item-search
+- https://affiliate.rakuten.co.jp/guides/link/
+- https://affiliate.rakuten.co.jp/guideline/rule/
+
+`npm.cmd run image-admin` → M8ブラウザで `http://127.0.0.1:18788/` → 商品選択 → 画面の「楽天アフィリエイト公式リンク作成ページを開く」から公式画面へ → 適用条件を確認し、同じ商品の「画像のみ」400×400をダウンロードして登録。
+
+- `source=rakuten_affiliate_link_creator` の画像は**400px以上**を許可。権利者個別許諾画像は引き続き600px以上。
+- 商品写真は500px以下のCSS表示で過度な引き伸ばしを抑制。合成時に画像への直接文字入れ・切り抜きを行わない。
+- リンク作成画像は**アフィリエイトURLを含むPR投稿**用。利用可否の判断が困難な創作性のある画像・人物入り画像は登録しない。
+- 楽天の商品ページからの画像取得や商品画像URLのサイズ書き換えは自動化しない。
+- テストは `npm.cmd run preview-image -- "shop:12345"`（実際の商品コードに置き換え）。Threadsには投稿しません。
+- `CFE_IMAGE_POST_ENABLED=false` のまま。公式リンク作成ページでの完全自動取得・画像投稿は未完成であり、現時点では画像1枚目の許諾確認を伴う半自動段階です。
+
