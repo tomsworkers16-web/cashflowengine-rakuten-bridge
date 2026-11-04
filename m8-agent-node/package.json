@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "start": "node --env-file=.env src/local-core-v2.js",
-    "check": "node --check src/local-core-v2.js && node --check src/external-reply-engine.js && node --check src/operations-agent.js",
+    "check": "node --check src/local-core-v2.js && node --check src/external-reply-engine.js && node --check src/operations-agent.js && node --check src/product-posting.js && node --check src/image-card.js && node --check src/preview-image-card.js",
     "night-eval": "node --env-file=.env src/operations-agent.js night-eval",
     "daily-commander": "node --env-file=.env src/operations-agent.js daily-commander",
-    "verify": "node --env-file=.env src/verify-integrations.js"
+    "verify": "node --env-file=.env src/verify-integrations.js",
+    "preview-image": "node --env-file=.env src/preview-image-card.js"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
