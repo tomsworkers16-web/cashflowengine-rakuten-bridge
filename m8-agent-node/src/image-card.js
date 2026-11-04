@@ -38,7 +38,7 @@ export function approvedImageFor(item, dataDir, { hasAffiliateLink = false } = {
 
 export async function renderProductCard(context, item, role, dataDir, opts = {}) {
   const asset = approvedImageFor(item, dataDir, opts);
-  if (!asset) throw new Error('no_licensed_high_resolution_image_for_item');
+  if (!asset) return renderEditorialCard(context, item, role, dataDir);
   const imageData = fs.readFileSync(asset.path);
   const dataUrl = 'data:' + asset.mime + ';base64,' + imageData.toString('base64');
   const original = cleanProductName(item?.itemName);
@@ -84,6 +84,52 @@ export async function renderProductCard(context, item, role, dataDir, opts = {})
     await page.screenshot({ path: filename, animations: 'disabled', timeout: 15000 });
     return { path: filename, template: role === 'comparison' ? 'compare-v3' : 'discover-v3',
       sourceImagePath: asset.path, sourceWidth: dimensions.width, sourceHeight: dimensions.height };
+  } finally { await page.close().catch(() => {}); }
+}
+
+// Original typography-only editorial card. No third-party product image is copied or implied.
+// The card is an alternative creative format, NOT a photograph of the product.
+export async function renderEditorialCard(context, item, role, dataDir) {
+  const name = cleanProductName(item?.itemName);
+  if (!name) throw new Error('missing_product_name');
+  const headline = role === 'comparison' ? 'どこを比べる？' : 'こんなの見つけた！';
+  const subline = role === 'comparison' ? '買う前にチェックしたい3つ' : '気になる暮らしのアイテム';
+  const price = Number(item?.price) > 0 ? '約 ' + Number(item.price).toLocaleString('ja-JP') + '円' : '価格は商品ページで確認';
+  const reviews = Number(item?.reviewCount) >= 1 ? Number(item.reviewCount).toLocaleString('ja-JP') + '件のレビュー' : '使い勝手を確認したい';
+  const folder = path.join(dataDir, 'image-cards');
+  fs.mkdirSync(folder, { recursive: true });
+  const key = String(item?.itemCode || 'product').replace(/[^a-zA-Z0-9_-]+/g, '_').slice(-48);
+  const filename = path.join(folder, [Date.now(), 'editorial', key].join('-') + '.png');
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 1080, height: 1350 });
+    const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>
+    *{box-sizing:border-box}
+    body{margin:0;background:#f8f5eb;color:#203c2c;font-family:"Yu Gothic","Meiryo",Arial,sans-serif}
+    .sheet{width:1080px;height:1350px;padding:68px 78px;position:relative;overflow:hidden;background:#f7f2e8}
+    .head{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #224735;padding-bottom:22px;font-weight:900;letter-spacing:4px;font-size:24px}
+    .volume{font-size:16px;letter-spacing:1px}
+    .eyebrow{margin-top:58px;font-size:25px;letter-spacing:4px;color:#637362;font-weight:700}
+    .title{font-size:72px;letter-spacing:-1px;margin-top:14px;line-height:1.25;font-weight:900}
+    .feature{position:absolute;top:380px;left:78px;right:78px;height:560px;background:#264b37;border-radius:23px;padding:50px 52px;color:white}
+    .accent{font-size:17px;letter-spacing:4px;color:#b6d5b1;font-weight:700}
+    .name{margin-top:58px;font-size:47px;line-height:1.35;font-weight:900;overflow-wrap:anywhere;max-height:280px;overflow:hidden}
+    .footer-panel{position:absolute;top:975px;left:78px;right:78px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    .price{font-size:47px;font-weight:900}
+    .reviews{font-size:24px;max-width:330px;text-align:right;padding-top:15px}
+    .note{position:absolute;bottom:74px;left:78px;right:78px;border-top:2px solid #b7c4b6;padding-top:19px;font-size:21px;color:#506453}
+    .issue{position:absolute;bottom:25px;left:78px;right:78px;font-size:17px;color:#7a8878}
+    </style></head><body><main class="sheet">
+    <header class="head"><span>RAKUMITSU SELECT</span><span class="volume">LIFE / FINDS</span></header>
+    <div class="eyebrow">${esc(subline)}</div><div class="title">${esc(headline)}</div>
+    <section class="feature"><div class="accent">PICK UP ITEM</div><div class="name">${esc(name)}</div></section>
+    <section class="footer-panel"><div class="price">${esc(price)}</div><div class="reviews">${esc(reviews)}</div></section>
+    <div class="note">サイズ・素材・使い勝手は商品情報で確認してね。</div>
+    <div class="issue">TEXT-ONLY EDITORIAL CARD / 商品写真ではありません</div>
+    </main></body></html>`;
+    await page.setContent(html, { waitUntil: 'load', timeout: 20000 });
+    await page.screenshot({ path: filename, animations: 'disabled', timeout: 15000 });
+    return { path: filename, template: role === 'comparison' ? 'editorial-compare-v1' : 'editorial-discovery-v1', source: 'original_typography_no_product_photo' };
   } finally { await page.close().catch(() => {}); }
 }
 
