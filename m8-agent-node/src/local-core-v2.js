@@ -157,7 +157,7 @@ function itemScore(i) {
 }
 async function rakutenBest(keyword, excluded = new Set()) {
   if (!RAKUTEN_APPLICATION_ID || !RAKUTEN_ACCESS_KEY || !RAKUTEN_AFFILIATE_ID) throw new Error('rakuten_credentials_missing');
-  const q = new URLSearchParams({ applicationId: RAKUTEN_APPLICATION_ID, accessKey: RAKUTEN_ACCESS_KEY, affiliateId: RAKUTEN_AFFILIATE_ID, keyword, format: 'json', hits: '20', sort: '-reviewCount', availability: '1' });
+  const q = new URLSearchParams({ applicationId: RAKUTEN_APPLICATION_ID, accessKey: RAKUTEN_ACCESS_KEY, affiliateId: RAKUTEN_AFFILIATE_ID, keyword, format: 'json', hits: '20', sort: '-reviewCount', availability: '1', imageFlag: '1' });
   const data = await fetchJson(`${RAKUTEN_API_BASE}?${q}`, { attempts: 2 });
   const items = (data.Items || data.items || []).map(normalizeItem)
     .filter(i => i.itemName && i.itemCode && i.price > 0 && /^https:\/\//.test(i.affiliateUrl))
@@ -274,7 +274,10 @@ async function postFor(slot, { catchup = false } = {}) {
   saveState(); event('POSTED', { id, slot, role: meta.role, itemCode: meta.itemCode || null, catchup });
 }
 
+let postingBusy = false;
 async function postingTick() {
+  if (postingBusy) return;
+  postingBusy = true;
   state.lastTickAt = new Date().toISOString();
   try {
     if (!AUTO_POST_ENABLED) { state.lastDecision = 'disabled'; saveState(); return; }
@@ -292,7 +295,7 @@ async function postingTick() {
     state.lastDecision = state.lastDecision === 'posted' ? 'posted' : 'waiting';
     state.lastError = null;
   } catch (e) { state.lastDecision = 'error'; state.lastError = e.message; event('POST_ERROR', { error: e.message }); }
-  saveState();
+  finally { postingBusy = false; saveState(); }
 }
 
 const chromeCandidates = ['C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Google/Chrome/Application/chrome.exe'];
