@@ -61,7 +61,7 @@ const html = [
 '<style>body{background:#f5f4ed;color:#243a30;max-width:780px;margin:20px auto;padding:15px;font-family:Meiryo,Arial,sans-serif}h1{font-size:26px}.box{background:white;padding:22px;border:1px solid #dce4db;border-radius:14px;margin:20px 0}label{display:block;font-weight:bold;margin:15px 0 6px}input[type=text],select{width:100%;box-sizing:border-box;padding:11px;border:1px solid #a8b4aa;border-radius:7px}button{background:#245b40;color:white;border:0;border-radius:7px;padding:11px 16px;margin:9px 0;cursor:pointer}button:disabled{background:#aab1a9}#results button{background:#e7f1e8;color:#23442f;text-align:left;width:100%}.warn{background:#fff5d9;border-left:5px solid #ba8e29;padding:14px;line-height:1.7}#message{white-space:pre-wrap}</style>',
 '</head><body><h1>ラクミツ｜画像素材登録</h1><div class="warn">許諾済みの高画質素材のみ登録できます。楽天APIのサムネイルを勝手に拡大したり、商品ページから無断取得したりしません。登録だけではSNS投稿されません。</div>',
 '<div class="box"><h2>1. 商品を選ぶ</h2><label>キーワード</label><input id="keyword" type="text" value="キッチン 便利グッズ"><button id="search">楽天の商品を検索</button><div id="results"></div><label>商品コード</label><input id="itemCode" type="text" placeholder="例：shop:12345"><small id="selected"></small></div>',
-'<div class="box"><h2>2. 許諾済み画像を登録</h2><label>画像（JPEG・PNG、縦横各600px以上、8MB以下）</label><input type="file" id="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg"><label>画像の利用権限</label><select id="source"><option value="">選択してください</option><option value="rights_holder_permission">権利者からの個別利用許諾</option><option value="rakuten_affiliate_link_creator">楽天リンク作成画面から条件に従い取得（PR投稿専用）</option></select>',
+'<div class="box"><h2>2. 利用可能な画像を登録</h2><p><a href="https://affiliate.rakuten.co.jp/" target="_blank" rel="noopener noreferrer">楽天アフィリエイト公式リンク作成ページを開く</a>（楽天のログインが必要）。「画像のみ」→400×400を選択し、ガイドラインの利用条件を確認のうえダウンロードしてください。</p><label>画像（JPEG・PNG、楽天リンク作成画像400px以上／個別許諾画像600px以上・8MB以下）</label><input type="file" id="file" accept=".png,.jpg,.jpeg,image/png,image/jpeg"><label>画像の利用権限</label><select id="source"><option value="">選択してください</option><option value="rights_holder_permission">権利者からの個別利用許諾</option><option value="rakuten_affiliate_link_creator">楽天リンク作成画面から条件に従い取得（PR投稿専用）</option></select>',
 '<label>許諾根拠・利用条件・確認日</label><input type="text" id="permission" placeholder="許諾メールや利用条件のURL・確認日"><p><label><input type="checkbox" id="confirm"> 画像の利用条件と商品コードを確認しました</label></p><button id="register">画像を登録</button><p id="message" role="status"></p></div>',
 '<div class="box"><h2>登録済み画像</h2><button id="refresh">更新</button><div id="registered"></div></div>',
 '<script>',
@@ -100,7 +100,8 @@ http.createServer(async(req,res)=>{
       const img=Buffer.from(b64,'base64');
       if(img.length<1000||img.length>8*1024*1024)throw Error('image_file_size_invalid');
       const d=inspectImage(img);
-      if(!d||Math.min(d.width,d.height)<600||Math.max(d.width,d.height)>10000)throw Error('source_resolution_below_600px');
+      const minPx=source==='rakuten_affiliate_link_creator'?400:600;
+      if(!d||Math.min(d.width,d.height)<minPx||Math.max(d.width,d.height)>10000)throw Error('source_resolution_below_'+minPx+'px');
       const filename=crypto.randomUUID()+d.ext;
       fs.writeFileSync(path.join(dir,filename),img,{flag:'wx'});
       const next={itemCode:code,filename,approved:true,source,permissionReference:ref,width:d.width,height:d.height,registeredAt:new Date().toISOString()};
