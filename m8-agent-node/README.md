@@ -133,6 +133,17 @@ Scheduled Tasks:
 - 商品画像の利用・加工が楽天/店舗/画像提供元の条件で許されるか確認してください。第三者の雑誌紙面は複製しません。
 - Healthの `imagePosting` に生成・ブラウザ公開フラグと直近エラーを表示します。
 
+### 投稿せずに画像を1枚テストする
+
+M8上のPowerShellから、リポジトリを開き次を実行してください。
+
+```powershell
+cd C:\\AI-Factory\\cashflowengine-rakuten-bridge\\m8-agent-node
+npm run preview-image
+```
+
+成功時は `ok: true` と `imagePath` を表示し、PNGを `.data/image-cards` に保存します。Threadsには一切投稿しません。楽天APIのアクセス許可IPが変更された場合はHTTP 403になり得ます。
+
 ### 実機での段階チェック
 
 1. 自動更新が反映されたか `http://127.0.0.1:18787/health` の `state.version` を確認。
