@@ -43,23 +43,25 @@ export async function renderProductCard(context, item, role, dataDir) {
       .top{font-size:28px;letter-spacing:6px;font-weight:800;border-bottom:2px solid #283e33;padding-bottom:19px}
       .eyebrow{font-size:23px;letter-spacing:2px;margin-top:52px;color:#68786b}
       .headline{font-size:61px;font-weight:800;margin:12px 0 36px;line-height:1.25}
-      .image-frame{height:660px;background:white;border:1px solid #deded7;display:flex;align-items:center;justify-content:center;padding:20px}
-      .image-frame img{max-width:100%;max-height:100%;object-fit:contain}
+      .image-frame{height:660px;background:linear-gradient(145deg,#fff 0%,#f0f2ed 100%);border:1px solid #deded7;display:flex;align-items:center;justify-content:center;padding:26px;overflow:hidden;position:relative}
+      .image-frame:before{content:"";position:absolute;inset:40px;border:1px solid #e8eae4;pointer-events:none}
+      .image-frame img{display:block;width:100%;height:100%;object-fit:contain;image-rendering:auto;position:relative;z-index:1}
+      .image-hint{position:absolute;z-index:2;bottom:15px;right:22px;font-size:14px;color:#7b867c;background:rgba(255,255,255,.87);padding:6px 10px}
       .label{margin-top:27px;font-size:28px;font-weight:800;line-height:1.5;max-height:110px;overflow:hidden}
       .row{display:flex;justify-content:space-between;align-items:center;margin-top:16px}
       .price{font-size:36px;font-weight:800}.reviews{font-size:22px}
       .footer{position:absolute;bottom:30px;left:78px;right:78px;border-top:1px solid #87968a;padding-top:15px;font-size:16px;color:#58675c;display:flex;justify-content:space-between}
     </style></head><body><div class="paper"><div class="top">RAKUMITSU SELECT</div>
       <div class="eyebrow">${esc(subtitle)}</div><div class="headline">${esc(headline)}</div>
-      <div class="image-frame"><img id="product" src="${esc(url)}" referrerpolicy="no-referrer"/></div>
+      <div class="image-frame"><img id="product" src="${esc(url)}" referrerpolicy="no-referrer"/><span class="image-hint">商品イメージ</span></div>
       <div class="label">${esc(name)}</div><div class="row"><span class="price">${esc(price)}</span><span class="reviews">${esc(reviews)}</span></div>
       <div class="footer"><span>商品画像：楽天市場掲載商品</span><span>価格・情報は取得時点 / 購入前に再確認</span></div>
     </div></body></html>`;
     await page.setContent(html, { waitUntil: 'load', timeout: 25000 });
-    const loaded = await page.locator('#product').evaluate(img => img.complete && img.naturalWidth > 0);
+    const loaded = await page.locator('#product').evaluate(img => img.complete && img.naturalWidth >= 64 && img.naturalHeight >= 64);
     if (!loaded) throw new Error('product_image_not_loaded');
     await page.screenshot({ path: filename, animations: 'disabled', timeout: 15000 });
-    return { path: filename, template: role === 'comparison' ? 'compare-v1' : 'discover-v1', sourceImageUrl: url };
+    return { path: filename, template: role === 'comparison' ? 'compare-v2' : 'discover-v2', sourceImageUrl: url };
   } finally {
     await page.close().catch(() => {});
   }
