@@ -5,6 +5,7 @@ import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText } from './product-posting.js';
+import { renderProductCard, publishImageBrowser } from './image-card.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -18,6 +19,9 @@ const RAKUTEN_ACCESS_KEY = env.RAKUTEN_ACCESS_KEY || '';
 const RAKUTEN_AFFILIATE_ID = env.RAKUTEN_AFFILIATE_ID || '';
 const RAKUTEN_API_BASE = env.RAKUTEN_API_BASE || 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 const AUTO_POST_ENABLED = String(env.CFE_AUTO_POST_ENABLED || 'false').toLowerCase() === 'true';
+const IMAGE_CARD_ENABLED = String(env.CFE_IMAGE_CARD_ENABLED || 'true').toLowerCase() === 'true';
+const IMAGE_POST_ENABLED = String(env.CFE_IMAGE_POST_ENABLED || 'false').toLowerCase() === 'true';
+let imageBrowserContext = null;
 const HEADLESS = String(env.THREADS_HEADLESS || 'true').toLowerCase() === 'true';
 const SCAN_MIN = Math.max(10, Number(env.THREADS_SCAN_INTERVAL_MINUTES || 30));
 const MAX_POSTS = Math.max(1, Math.min(5, Number(env.CFE_MAX_POSTS_PER_DAY || 3)));
@@ -55,7 +59,12 @@ let state = {
   lastEligibleReplyCount: 0,
   lastExternalReplyAt: null,
   lastExternalReplyResult: null,
-  lastRakutenKeyword: null
+  lastRakutenKeyword: null,
+  lastImagePostAt: null,
+  lastImagePostResult: null,
+  lastImageTemplate: null,
+  lastImagePostError: null,
+  imageFallbackUsed: false
 };
 
 try {
@@ -132,7 +141,8 @@ function normalizeItem(entry) {
   return {
     itemName: i.itemName || '', price: Number(i.itemPrice || 0), affiliateUrl: i.affiliateUrl || '',
     reviewCount: Number(i.reviewCount || 0), reviewAverage: Number(i.reviewAverage || 0),
-    shopName: i.shopName || '', pointRate: Number(i.pointRate || 0), postageFlag: i.postageFlag, itemCode: i.itemCode || ''
+    shopName: i.shopName || '', pointRate: Number(i.pointRate || 0), postageFlag: i.postageFlag, itemCode: i.itemCode || '',
+    mediumImageUrls: i.mediumImageUrls || [], smallImageUrls: i.smallImageUrls || []
   };
 }
 function itemScore(i) {
@@ -175,6 +185,7 @@ async function postFor(slot, { catchup = false } = {}) {
   if (todayLocalPosts().some(p => p.slot === slot)) { state.lastDecision = 'slot_already_posted'; return; }
   const role = catchup ? 'discovery' : roleForSlot(slot, SLOTS, nowJst().getUTCDate());
   let text = null;
+  let chosenItem = null;
   const meta = { role, slot, catchup, copyPolicy: 'product-first-v1' };
   const used = recentlyFeaturedItems();
   const keywordBase = (nowJst().getUTCDate() + Math.max(0, SLOTS.indexOf(slot))) % KEYWORDS.length;
@@ -185,7 +196,10 @@ async function postFor(slot, { catchup = false } = {}) {
       const item = await rakutenBest(kw, used);
       if (!item) continue;
       text = role === 'revenue' ? revenueText(item) : editorialText(item, role);
-      if (text) Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue' });
+      if (text) {
+        chosenItem = item;
+        Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue' });
+      }
     } catch (e) { event('RAKUTEN_PRODUCT_ERROR', { keyword: kw, error: e.message }); }
   }
   if (!text) {
@@ -204,8 +218,57 @@ async function postFor(slot, { catchup = false } = {}) {
   if (official.some(p => String(p.text || '').trim() === text.trim())) {
     state.lastDecision = 'duplicate_official_text'; return;
   }
-  const id = await publishThreads(text);
-  const row = { at: new Date().toISOString(), jstDate: dayKey(), slot, id, text, meta };
+  let id = null;
+  let imageCard = null;
+  if (IMAGE_CARD_ENABLED && chosenItem && role !== 'revenue' && imageBrowserContext) {
+    try {
+      imageCard = await renderProductCard(imageBrowserContext, chosenItem, role, DATA_DIR);
+      state.lastImageTemplate = imageCard.template;
+      state.lastImagePostResult = 'card_generated';
+      state.lastImagePostError = null;
+      event('IMAGE_CARD_GENERATED', { slot, itemCode: meta.itemCode, template: imageCard.template });
+    } catch (e) {
+      state.lastImagePostResult = 'card_generation_failed';
+      state.lastImagePostError = e.message;
+      event('IMAGE_CARD_ERROR', { slot, error: e.message });
+    }
+  }
+  if (IMAGE_POST_ENABLED && imageCard && imageBrowserContext) {
+    try {
+      const result = await publishImageBrowser(imageBrowserContext, imageCard.path, text);
+      state.lastImagePostResult = result.status;
+      // The browser's submit click is NOT a durable success guarantee.
+      // Check the official API; never blindly publish the same text through the API.
+      await sleep(5000);
+      const verified = (await threadsToday()).find(p => String(p.text || '').trim() === text.trim());
+      if (verified?.id) {
+        id = verified.id;
+        state.lastImagePostResult = 'verified_posted';
+        state.lastImagePostAt = new Date().toISOString();
+      } else {
+        state.lastDecision = 'image_publish_unverified';
+        state.lastImagePostError = 'browser_submit_not_confirmed_by_threads_api';
+        append(postsFile, { at: new Date().toISOString(), jstDate: dayKey(), slot, id: null, text, meta: { ...meta, publishStatus: 'unverified', imageTemplate: imageCard.template } });
+        saveState();
+        event('IMAGE_POST_UNVERIFIED', { slot, itemCode: meta.itemCode });
+        return;
+      }
+    } catch (e) {
+      state.lastImagePostResult = e.submitAttempted ? 'uncertain' : 'failed_before_submit';
+      state.lastImagePostError = e.message;
+      event('IMAGE_POST_ERROR', { slot, error: e.message, submitAttempted: Boolean(e.submitAttempted) });
+      if (e.submitAttempted) {
+        // Uncertain post outcome: do not text-fallback or retry, to avoid duplicates.
+        state.lastDecision = 'image_publish_uncertain';
+        append(postsFile, { at: new Date().toISOString(), jstDate: dayKey(), slot, id: null, text, meta: { ...meta, publishStatus: 'uncertain' } });
+        saveState();
+        return;
+      }
+      state.imageFallbackUsed = true;
+    }
+  }
+  if (!id) id = await publishThreads(text);
+  const row = { at: new Date().toISOString(), jstDate: dayKey(), slot, id, text, meta: { ...meta, imageTemplate: id && state.lastImagePostResult === 'verified_posted' ? imageCard?.template : null } };
   append(postsFile, row);
   Object.assign(state, { lastPostAt: row.at, lastPostId: id, lastDecision: 'posted', lastError: null });
   saveState(); event('POSTED', { id, slot, role: meta.role, itemCode: meta.itemCode || null, catchup });
@@ -299,6 +362,7 @@ async function browserLoop() {
       executablePath: chromeExe(), headless: HEADLESS, chromiumSandbox: true,
       viewport: { width: 1440, height: 1000 }, args: ['--disable-blink-features=AutomationControlled']
     });
+    imageBrowserContext = ctx;
     state.browserOk = true; state.lastBrowserError = null; saveState();
 
     const run = async () => {
@@ -344,6 +408,7 @@ http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       ok: true, mode: 'm8-local-only', state, threads: th,
       autoPostEnabled: AUTO_POST_ENABLED, slots: SLOTS, maxPostsPerDay: MAX_POSTS,
+      imagePosting: { cardGenerationEnabled: IMAGE_CARD_ENABLED, browserPublishingEnabled: IMAGE_POST_ENABLED, browserReady: Boolean(imageBrowserContext), lastResult: state.lastImagePostResult, lastError: state.lastImagePostError },
       externalReply: { enabled: EXTERNAL_REPLY_ENABLED, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, browserOk: state.browserOk, lastError: state.lastBrowserError, discoveryQueries: DISCOVERY_QUERIES },
       externalRuntimeDependencies: [], directExternalApis: ['Meta Threads API','Rakuten API']
     }, null, 2)); return;
@@ -355,7 +420,7 @@ http.createServer(async (req, res) => {
   res.statusCode = 404; res.end(JSON.stringify({ error: 'not_found' }));
 }).listen(PORT, '127.0.0.1', () => event('LOCAL_API_STARTED', { url: `http://127.0.0.1:${PORT}` }));
 
-state.version = 'm8-local-core-v2-product-first';
+state.version = 'm8-local-core-v2-image-card-v1';
 state.startedAt = new Date().toISOString();
 saveState();
 event('M8_LOCAL_CORE_STARTED', { version: state.version, slots: SLOTS, autoPostEnabled: AUTO_POST_ENABLED, externalReplyEnabled: EXTERNAL_REPLY_ENABLED });
