@@ -4,6 +4,7 @@ import http from 'node:http';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
+import { roleForSlot, editorialText, revenueText } from './product-posting.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -144,33 +145,23 @@ function itemScore(i) {
   if (/^https?:\/\//.test(i.affiliateUrl)) s += 5;
   return s;
 }
-async function rakutenBest(keyword) {
+async function rakutenBest(keyword, excluded = new Set()) {
   if (!RAKUTEN_APPLICATION_ID || !RAKUTEN_ACCESS_KEY || !RAKUTEN_AFFILIATE_ID) throw new Error('rakuten_credentials_missing');
   const q = new URLSearchParams({ applicationId: RAKUTEN_APPLICATION_ID, accessKey: RAKUTEN_ACCESS_KEY, affiliateId: RAKUTEN_AFFILIATE_ID, keyword, format: 'json', hits: '20', sort: '-reviewCount', availability: '1' });
   const data = await fetchJson(`${RAKUTEN_API_BASE}?${q}`, { attempts: 2 });
-  return (data.Items || data.items || []).map(normalizeItem).filter(i => /^https?:\/\//.test(i.affiliateUrl)).sort((a, b) => itemScore(b) - itemScore(a))[0] || null;
+  const items = (data.Items || data.items || []).map(normalizeItem)
+    .filter(i => i.itemName && i.itemCode && i.price > 0 && /^https:\/\//.test(i.affiliateUrl))
+    .sort((a, b) => itemScore(b) - itemScore(a));
+  return items.find(i => !excluded.has(i.itemCode)) || items[0] || null;
 }
 
-function roleForSlot(slot) {
-  const idx = SLOTS.indexOf(slot);
-  if (SLOTS.length <= 1) return 'revenue';
-  if (SLOTS.length === 2) return idx === 0 ? 'growth' : 'revenue';
-  if (SLOTS.length === 3) return ['growth', 'revenue', 'trust'][idx] || 'growth';
-  return ['growth', 'revenue', 'trust', 'growth', 'revenue'][idx] || 'growth';
+function recentlyFeaturedItems() {
+  const cutoff = Date.now() - 7 * 86400000;
+  return new Set(readJsonl(postsFile).filter(p => Date.parse(p.at || '') >= cutoff)
+    .map(p => p.meta?.itemCode).filter(Boolean));
 }
-function growthText(seed = '暮らしの時短') {
-  const v = [
-    `${seed}で「これだけは毎回めんどう」って作業、何ですか？\n便利グッズを探すなら、まずリアルな困りごとから知りたいです。`,
-    `${seed}って、安い物より「毎日の手間が1つ減る物」の方が満足度高い気がします。\n何を一番ラクにしたいですか？`,
-    `${seed}の便利アイテム、選ぶならどれを優先します？\n①時短 ②片付けやすさ ③価格 ④手入れの楽さ`
-  ];
-  return v[new Date().getDate() % v.length];
-}
-function trustText(seed = '暮らしの時短') { return `${seed}の物を選ぶときは「便利そう」だけでなく、\n・置き場所\n・洗いやすさ\n・毎週使うか\nまで見ると失敗しにくいです。\n結局、使い続けられる物が一番コスパいい。`; }
-function revenueText(i) {
-  const name = String(i.itemName || '便利アイテム').replace(/\s+/g, ' ').slice(0, 90);
-  const price = i.price ? `\n目安 ${i.price.toLocaleString('ja-JP')}円。` : '';
-  return `【PR】便利グッズは「毎日使うか」で選ぶ派です。\n今回気になったのは ${name}${price}\n詳細はこちら👇\n${i.affiliateUrl}`.slice(0, 500);
+function safeFallbackText() {
+  return '便利グッズを選ぶときは、価格だけでなく「置き場所」「手入れのしやすさ」「本当に使う頻度」まで確認したい。\n\n買う前のひと手間で、使わなくなる失敗を減らせそう。';
 }
 function dueSlot() {
   const now = jstMinutes();
@@ -182,22 +173,42 @@ async function postFor(slot, { catchup = false } = {}) {
   const official = await threadsToday();
   if (official.length >= MAX_POSTS) { state.lastDecision = 'daily_cap_reached'; return; }
   if (todayLocalPosts().some(p => p.slot === slot)) { state.lastDecision = 'slot_already_posted'; return; }
-  let role = catchup ? 'growth' : roleForSlot(slot), text;
-  let meta = { role, slot, catchup };
-  if (role === 'revenue') {
+  const role = catchup ? 'discovery' : roleForSlot(slot, SLOTS, nowJst().getUTCDate());
+  let text = null;
+  const meta = { role, slot, catchup, copyPolicy: 'product-first-v1' };
+  const used = recentlyFeaturedItems();
+  const keywordBase = (nowJst().getUTCDate() + Math.max(0, SLOTS.indexOf(slot))) % KEYWORDS.length;
+  for (let attempt = 0; attempt < Math.min(KEYWORDS.length, 3) && !text; attempt++) {
+    const kw = KEYWORDS[(keywordBase + attempt) % KEYWORDS.length];
     try {
-      const kw = KEYWORDS[(new Date().getDate() + Math.max(0, SLOTS.indexOf(slot))) % KEYWORDS.length];
       state.lastRakutenKeyword = kw;
-      const item = await rakutenBest(kw);
-      if (item) { text = revenueText(item); meta = { ...meta, keyword: kw, itemCode: item.itemCode, price: item.price }; }
-    } catch (e) { event('RAKUTEN_FALLBACK', { error: e.message }); role = 'growth'; meta.role = 'growth_fallback'; }
+      const item = await rakutenBest(kw, used);
+      if (!item) continue;
+      text = role === 'revenue' ? revenueText(item) : editorialText(item, role);
+      if (text) Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue' });
+    } catch (e) { event('RAKUTEN_PRODUCT_ERROR', { keyword: kw, error: e.message }); }
   }
-  if (!text) text = role === 'trust' ? trustText() : growthText();
+  if (!text) {
+    if (role === 'revenue') {
+      state.lastDecision = 'revenue_skipped_no_valid_product';
+      event('POST_SKIPPED', { slot, reason: state.lastDecision });
+      return;
+    }
+    // Non-commercial fallback: no invented product, testimonial or broken link.
+    text = safeFallbackText();
+    meta.role = 'editorial_fallback';
+    if (todayLocalPosts().some(p => p.text === text)) {
+      state.lastDecision = 'fallback_already_posted'; return;
+    }
+  }
+  if (official.some(p => String(p.text || '').trim() === text.trim())) {
+    state.lastDecision = 'duplicate_official_text'; return;
+  }
   const id = await publishThreads(text);
   const row = { at: new Date().toISOString(), jstDate: dayKey(), slot, id, text, meta };
   append(postsFile, row);
   Object.assign(state, { lastPostAt: row.at, lastPostId: id, lastDecision: 'posted', lastError: null });
-  saveState(); event('POSTED', { id, slot, role: meta.role, catchup });
+  saveState(); event('POSTED', { id, slot, role: meta.role, itemCode: meta.itemCode || null, catchup });
 }
 
 async function postingTick() {
@@ -344,7 +355,7 @@ http.createServer(async (req, res) => {
   res.statusCode = 404; res.end(JSON.stringify({ error: 'not_found' }));
 }).listen(PORT, '127.0.0.1', () => event('LOCAL_API_STARTED', { url: `http://127.0.0.1:${PORT}` }));
 
-state.version = 'm8-local-core-v2';
+state.version = 'm8-local-core-v2-product-first';
 state.startedAt = new Date().toISOString();
 saveState();
 event('M8_LOCAL_CORE_STARTED', { version: state.version, slots: SLOTS, autoPostEnabled: AUTO_POST_ENABLED, externalReplyEnabled: EXTERNAL_REPLY_ENABLED });
