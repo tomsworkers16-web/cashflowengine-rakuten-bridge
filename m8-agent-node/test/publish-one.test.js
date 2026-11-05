@@ -50,7 +50,7 @@ test('explicit one-shot publishes exactly once; dry-run performs no POST and ret
    RAKUTEN_KEYWORDS:'キッチン 便利グッズ'};
   const preview=await run(env,['--dry-run']);
   assert.equal(preview.code,0,preview.stderr);
-  assert.match(preview.stdout,/preview_ready/);
+  assert.match(preview.stdout,/\"mode\": \"dry_run\"/);
   assert.equal(sends,0);
   assert.equal(fs.existsSync(path.join(dir,'posts.jsonl')),false);
   const live=await run(env);
