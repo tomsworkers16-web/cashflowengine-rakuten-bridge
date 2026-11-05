@@ -57,7 +57,7 @@ export function stripVerifiedDailyReportPreamble(csv) {
  for(let i=1;i<=Math.min(3,lines.length-2);i++){
   if(lines.slice(1,i).some(line=>line.trim()))break;
   let cells;
-  try{cells=parseCsv(lines[i]);}catch{continue;}
+  try{cells=parseCsv(lines[i])[0]||[];}catch{continue;}
   if(cells.length<3||cells.length>30)continue;
   const normalized=cells.map(norm);
   const count=(key)=>normalized.filter(h=>HEADERS[key].some(alias=>norm(alias)===h)).length;
