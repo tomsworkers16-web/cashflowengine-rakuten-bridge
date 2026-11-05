@@ -45,10 +45,37 @@ async function readControls(page){
 export function isPeriodTabLabel(text) {
  return String(text || '').trim() === '期間別';
 }
+// Rakuten's report tabs are rendered as native buttons. Their accessible
+// names are not always equal to their visible text, so inspect the actual
+// rendered button text, never a broad role/name query that may return zero.
+export function selectPeriodButtonIndices(buttons){
+ return buttons.map((b,i)=>isPeriodTabLabel(b.text)?i:-1).filter(i=>i>=0);
+}
+async function periodTabCandidates(page){
+ return page.locator('button').evaluateAll(buttons=>buttons.map((b,index)=>({
+  index, visible:Boolean(b.getClientRects().length),
+  text:(b.innerText||b.textContent||'').replace(/\s+/g,' ').trim(),
+  disabled:b.disabled
+ })).filter(b=>b.visible&&b.text));
+}
 async function selectPeriodReport(page){
- const tab=page.getByRole('button',{name:'期間別',exact:true});
- if(await tab.count()!==1)return {selected:false,status:'period_tab_not_unique'};
- await tab.click({timeout:BROWSER_WAIT_MS});
+ let controls=[];
+ // A hydrated page may mount buttons after domcontentloaded; check up to 5s.
+ for(let attempt=0;attempt<10;attempt++){
+  controls=await periodTabCandidates(page);
+  if(selectPeriodButtonIndices(controls).length===1)break;
+  await page.waitForTimeout(500);
+ }
+ const indices=selectPeriodButtonIndices(controls);
+ if(indices.length!==1)return {
+  selected:false,status:indices.length?'period_tab_ambiguous':'period_tab_not_found',
+  diagnostic:{periodMatches:indices.length,
+   visibleButtons:controls.map(b=>b.text.slice(0,55)).slice(0,25)}
+ };
+ const selected=controls[indices[0]];
+ if(selected.disabled)return {selected:false,status:'period_tab_disabled'};
+ // Use the DOM-index of the inspected native button, not a name-based locator.
+ await page.locator('button').nth(selected.index).click({timeout:BROWSER_WAIT_MS});
  await page.waitForTimeout(1800);
  if(classifyRakutenReportPage(page.url())!=='report')
   return {selected:false,status:'report_navigation_changed'};
@@ -114,7 +141,7 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     noDownload:true,noPosting:true};
   const tabResult=await selectPeriodReport(page);
   if(!tabResult.selected)
-   return {mode,status:tabResult.status,pageType:'report',controls:await readControls(page),
+   return {mode,status:tabResult.status,pageType:'report',diagnostic:tabResult.diagnostic||null,controls:await readControls(page),
     noDownload:true,noPosting:true};
   const controls=await readControls(page);
   if(mode==='inspect')
