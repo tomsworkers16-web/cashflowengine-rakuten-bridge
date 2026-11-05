@@ -24,3 +24,16 @@ All numbers above are **format examples only**, not actual Cash Flow Engine resu
 Future work: implement a consented, supported dashboard or report import with an explicit source-specific mapping. Do not scrape private pages or infer conversions from Threads views. A report should carry its download date and provenance before being accepted as verified business evidence.
 
 Safety: `affiliate-results.json` remains local and should not be committed to Git.
+
+## Import deduplication
+
+If the data source supplies a stable identifier for an individual result row, include
+`"recordId":"source-unique-id"`. Repeated rows with the same `source` + `recordId`
+are counted once and the nightly report exposes `duplicateRecordsIgnored`.
+
+This protects against accidentally importing the same result twice. Rows **without**
+stable IDs cannot be safely deduplicated; avoid re-importing overlapping reports.
+Do not invent an order-level record ID where the provider offers only day-level totals.
+Do not combine daily totals and order-level details for the same metric or source,
+because this would double-count. The current importer has no source-specific semantics
+for overlapping totals.
