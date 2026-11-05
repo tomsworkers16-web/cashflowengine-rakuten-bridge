@@ -45,9 +45,32 @@ function nonnegative(x,label){
   const v=Number(raw);if(!Number.isFinite(v))throw Error('invalid_'+label);
   return v;
 }
+// Rakuten's exported day report may include a free-form title (occasionally
+// containing an unescaped quote), then an empty line and its real CSV header.
+// Identify the report by exact supported column labels before ignoring metadata.
+// Never relax CSV quote validation for the actual header or data records.
+export function stripVerifiedDailyReportPreamble(csv) {
+ const lines=csv.split(/\r\n|\n|\r/);
+ if(lines.length<3||lines[0].length>300||lines[0].includes(','))return csv;
+ for(let i=1;i<=Math.min(3,lines.length-2);i++){
+  if(lines.slice(1,i).some(line=>line.trim()))break;
+  let cells;
+  try{cells=parseCsv(lines[i]);}catch{continue;}
+  if(cells.length!==1||cells[0].length<3||cells[0].length>30)continue;
+  const normalized=cells[0].map(norm);
+  const count=(key)=>normalized.filter(h=>HEADERS[key].some(alias=>norm(alias)===h)).length;
+  if(count('day')!==1)continue;
+  if(['clicks','orders','rewardYen'].filter(key=>count(key)===1).length<2)continue;
+  // Prefer a known five-column layout, but preserve legacy header variants
+  // once date and two metric labels are exact matches.
+  const candidate=lines.slice(i).join('\n');
+  if(candidate) return candidate;
+ }
+ return csv;
+}
 export function parseRakutenDailyCsv(csv) {
   if(typeof csv!=='string'||!csv.trim()||csv.length>5*1024*1024)throw Error('invalid_csv_size');
-  const rows=parseCsv(csv);
+  const rows=parseCsv(stripVerifiedDailyReportPreamble(csv));
   if(rows.length<2)throw Error('no_data_rows');
   // Rakuten may prepend a one-cell title (e.g. report name) above the
   // five-column daily data header. Only skip a *single* title row if the
