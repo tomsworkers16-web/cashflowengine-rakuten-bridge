@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -56,4 +56,25 @@ test('guarded daily report export buttons must be uniquely matched and enabled',
  assert.deepEqual(exactButtonIndices(buttons,'ダウンロード'),[2]);
  assert.deepEqual(exactButtonIndices(buttons,'CSV'),[]);
  assert.deepEqual(exactButtonIndices([{text:'ダウンロード'},{text:'ダウンロード'}],'ダウンロード'),[0,1]);
+});
+
+test('CSV export submenu only selects one visible exact CSV anchor',()=>{
+ const links=[
+  {index:0,text:'ヘルプ',visible:true},
+  {index:1,text:'CSV',visible:true,href:'#'},
+  {index:2,text:'CSV',visible:false,href:'#'}
+ ];
+ assert.deepEqual(exactCsvLinkIndices(links),[1]);
+ assert.deepEqual(exactCsvLinkIndices([{text:'CSVデータ',visible:true}]),[]);
+ assert.deepEqual(exactCsvLinkIndices([
+  {text:'CSV',visible:true},{text:'CSV',visible:true}
+ ]),[0,1]);
+});
+test('CSV download link must stay on official Rakuten report origin',()=>{
+ assert.equal(isSafeRakutenExportLink('#'),true);
+ assert.equal(isSafeRakutenExportLink('/report/download'),true);
+ assert.equal(isSafeRakutenExportLink('https://affiliate.rakuten.co.jp/report/'),true);
+ assert.equal(isSafeRakutenExportLink('javascript:alert(1)'),false);
+ assert.equal(isSafeRakutenExportLink('https://affiliate.rakuten.co.jp.evil.test/report/'),false);
+ assert.equal(isSafeRakutenExportLink('http://affiliate.rakuten.co.jp/report/'),false);
 });
