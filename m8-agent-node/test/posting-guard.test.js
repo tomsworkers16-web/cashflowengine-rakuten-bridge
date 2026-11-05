@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publishTextOnce, findRecoverablePosts } from '../src/posting-guard.js';
+import { publishTextOnce, findRecoverablePosts, postedNearAttempt } from '../src/posting-guard.js';
 
 const args = (overrides = {}) => ({
   text:'【PR】商品はこちら', slot:'12:30',jstDate:'2026-11-05',
@@ -37,7 +37,7 @@ test('failed POST response with a matching official post is recovered', async ()
   const result=await publishTextOnce(args({
     record:r=>journal.push(r),
     send:async()=>{throw Error('network_closed');},
-    lookup:async()=>[{id:'confirmed-id',text:'【PR】商品はこちら'}]
+    lookup:async()=>[{id:'confirmed-id',text:'【PR】商品はこちら',timestamp:new Date().toISOString()}]
   }));
   assert.equal(result.status,'verified_posted');
   assert.equal(result.id,'confirmed-id');
@@ -66,8 +66,9 @@ test('failed intent journal stops all network activity', async () => {
 });
 
 test('uncertain post is recovered from official timeline without posting',()=>{
-  const row={jstDate:'2026-11-05',slot:'12:30',id:null,text:'unique copy',meta:{publishStatus:'uncertain'}};
-  const found=findRecoverablePosts([row],[{id:'official-1',text:'unique copy'}],'2026-11-05');
+  const pending={at:'2026-11-05T03:30:00.000Z',jstDate:'2026-11-05',slot:'12:30',id:null,text:'unique copy',meta:{publishStatus:'pending'}};
+  const row={...pending,at:'2026-11-05T03:30:05.000Z',meta:{publishStatus:'uncertain'}};
+  const found=findRecoverablePosts([pending,row],[{id:'official-1',text:'unique copy',timestamp:'2026-11-05T03:30:04.000Z'}],'2026-11-05');
   assert.equal(found.length,1);assert.equal(found[0].id,'official-1');
   assert.equal(found[0].meta.publishStatus,'verified_posted');
 });
@@ -88,4 +89,22 @@ test('resolved slots are not reconciled repeatedly',()=>{
   const row={jstDate:'2026-11-05',slot:'12:30',id:null,text:'text',meta:{publishStatus:'uncertain'}};
   const done={...row,id:'confirmed',meta:{publishStatus:'verified_posted'}};
   assert.deepEqual(findRecoverablePosts([row,done],[{id:'confirmed',text:'text'}],'2026-11-05'),[]);
+});
+
+test('does not associate an older same-text post with a fresh publishing attempt',async()=>{
+  const journal=[];
+  const result=await publishTextOnce(args({
+    record:r=>journal.push(r),
+    send:async()=>{throw Error('timeout');},
+    lookup:async()=>[{id:'old',text:'【PR】商品はこちら',timestamp:'2026-11-04T00:00:00Z'}]
+  }));
+  assert.equal(result.status,'uncertain');
+});
+
+test('reconciliation refuses missing timestamps and old same-text posts',()=>{
+  const pending={at:'2026-11-05T03:30:00Z',jstDate:'2026-11-05',slot:'12:30',id:null,text:'same',meta:{publishStatus:'pending'}};
+  const uncertain={...pending,at:'2026-11-05T03:31:00Z',meta:{publishStatus:'uncertain'}};
+  assert.deepEqual(findRecoverablePosts([pending,uncertain],[{id:'old',text:'same',timestamp:'2026-11-05T01:30:00Z'}],'2026-11-05'),[]);
+  assert.deepEqual(findRecoverablePosts([pending,uncertain],[{id:'missing-date',text:'same'}],'2026-11-05'),[]);
+  assert.equal(postedNearAttempt({timestamp:'2026-11-05T03:31:00Z'},pending.at),true);
 });
