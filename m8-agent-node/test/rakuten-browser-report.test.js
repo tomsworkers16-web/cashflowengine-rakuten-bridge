@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -29,4 +29,15 @@ test('period report tab identification is exact and excludes other report types'
  assert.equal(isPeriodTabLabel('注文明細'),false);
  assert.equal(isPeriodTabLabel('成果報酬・確定実績'),false);
  assert.equal(isPeriodTabLabel('期間別CSVダウンロード'),false);
+});
+
+test('visible native button text maps to exact period tab even when accessible name differs',()=>{
+ const buttons=[
+  {index:0,text:'サマリ'},
+  {index:1,text:'期間別'},
+  {index:2,text:'成果報酬・確定実績'}
+ ];
+ assert.deepEqual(selectPeriodButtonIndices(buttons),[1]);
+ assert.deepEqual(selectPeriodButtonIndices([{text:'期間別 CSV'},{text:'期間別レポート'}]),[]);
+ assert.deepEqual(selectPeriodButtonIndices([{text:'期間別'},{text:'期間別'}]),[0,1]);
 });
