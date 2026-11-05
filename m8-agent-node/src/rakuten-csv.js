@@ -5,6 +5,8 @@ const HEADERS = {
   clicks: ['クリック数','クリック','clicks'],
   orders: ['注文件数','注文数','成果件数','発生成果件数','orders'],
   rewardYen: ['成果報酬','成果報酬額','発生成果報酬','報酬額','報酬','rewardYen'],
+  salesCount: ['売上件数'],
+  salesAmountYen: ['売上金額'],
 };
 function norm(x) {return String(x ?? '').replace(/^\uFEFF/,'').normalize('NFKC').trim().replace(/[\s　]/g,'').toLowerCase();}
 export function parseCsv(csv) {
@@ -109,7 +111,7 @@ export function parseRakutenDailyCsv(csv) {
     }
     if(byDay.has(date))throw Error('duplicate_day_in_csv_'+date);
     const out={jstDate:date,source:'rakuten_csv_period_daily',recordId:'period:'+date,rewardStatus:'provisional'};
-    for(const key of ['clicks','orders','rewardYen']){
+    for(const key of ['clicks','orders','rewardYen','salesCount','salesAmountYen']){
       if(idx[key]>=0){
         const value=nonnegative(cells[idx[key]],key);
         if(value!==null)out[key]=value;
