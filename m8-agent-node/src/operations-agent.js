@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { summarizePostJournal } from './report-posts.js';
 import { summarizeAffiliateDay } from './revenue-metrics.js';
+import { scanRakutenInbox } from './rakuten-report-importer.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -110,6 +111,7 @@ async function buildNightReport(day = dayKey()) {
   const state = readJson(stateFile, {});
   const postJournal = readJsonl(postsFile).filter(x => withinDay(x, day));
   const postSummary = summarizePostJournal(postJournal);
+  const affiliateImport = scanRakutenInbox(dataDir);
   const affiliate = summarizeAffiliateDay(readJson(path.join(dataDir, 'affiliate-results.json'), null), day);
   const posts = postSummary.published;
   const replies = readJsonl(repliesFile).filter(x => withinDay(x, day));
@@ -156,6 +158,7 @@ async function buildNightReport(day = dayKey()) {
       profit: affiliate.profitYen
     },
     affiliateResults: affiliate,
+    affiliateImport,
     decisions: {
       keepAutoPostEnabled: true,
       keepExternalReplyEnabled: true,

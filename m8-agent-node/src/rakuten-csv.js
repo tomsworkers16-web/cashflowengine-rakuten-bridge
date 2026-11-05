@@ -1,0 +1,93 @@
+// Strict, offline importer for Rakuten *period-by-day* reports, not order-detail exports.
+// Rakuten CSV headings may change. Unknown/missing metrics remain unknown.
+const HEADERS = {
+  day: ['日付','年月日','成果発生日','date','day'],
+  clicks: ['クリック数','クリック','clicks'],
+  orders: ['注文件数','注文数','成果件数','発生成果件数','orders'],
+  rewardYen: ['成果報酬','成果報酬額','発生成果報酬','報酬額','報酬','rewardYen'],
+};
+function norm(x) {return String(x ?? '').replace(/^\uFEFF/,'').normalize('NFKC').trim().replace(/[\s　]/g,'').toLowerCase();}
+export function parseCsv(csv) {
+  const rows=[];let row=[];let field='';let quoted=false;
+  for(let i=0;i<csv.length;i++){
+    const c=csv[i];
+    if(quoted){
+      if(c==='"' && csv[i+1]==='"'){field+='"';i++;}
+      else if(c==='"')quoted=false;else field+=c;
+    } else {
+      if(c==='"'){if(field)throw Error('invalid_csv_quotes');quoted=true;}
+      else if(c===','){row.push(field);field='';}
+      else if(c==='\n'||c==='\r'){
+        if(c==='\r'&&csv[i+1]==='\n')i++;
+        row.push(field);field='';
+        if(row.some(v=>v.trim()))rows.push(row);
+        row=[];
+      }else field+=c;
+    }
+  }
+  if(quoted)throw Error('unterminated_csv_quote');
+  row.push(field);if(row.some(v=>v.trim()))rows.push(row);
+  return rows;
+}
+function dateValue(x){
+  const s=String(x||'').trim().normalize('NFKC');
+  const m=s.match(/^(\d{4})(?:[\/-]|年)(\d{1,2})(?:[\/-]|月)(\d{1,2})日?$/) || s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(!m)return null;
+  const year=+m[1],month=+m[2],day=+m[3];
+  const valid=new Date(Date.UTC(year,month-1,day));
+  if(valid.getUTCFullYear()!==year||valid.getUTCMonth()!==month-1||valid.getUTCDate()!==day)return null;
+  return [m[1],String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-');
+}
+function nonnegative(x,label){
+  const raw=String(x??'').trim().normalize('NFKC').replace(/[¥￥,，\s]/g,'');
+  if(raw==='' || raw==='-' || raw==='－')return null;
+  if(!/^\d+(?:\.\d+)?$/.test(raw))throw Error('invalid_'+label+':'+String(x).slice(0,30));
+  const v=Number(raw);if(!Number.isFinite(v))throw Error('invalid_'+label);
+  return v;
+}
+export function parseRakutenDailyCsv(csv) {
+  if(typeof csv!=='string'||!csv.trim()||csv.length>5*1024*1024)throw Error('invalid_csv_size');
+  const rows=parseCsv(csv);
+  if(rows.length<2)throw Error('no_data_rows');
+  const header=rows[0].map(norm);
+  const idx={};
+  for(const [key,aliases]of Object.entries(HEADERS)){
+    const matches=header.map((h,i)=>aliases.map(norm).includes(h)?i:-1).filter(i=>i>=0);
+    if(matches.length>1)throw Error('ambiguous_column_'+key);
+    idx[key]=matches.length===1?matches[0]:-1;
+  }
+  if(idx.day<0)throw Error('date_column_missing');
+  if(['clicks','orders','rewardYen'].every(key=>idx[key]<0))throw Error('no_supported_metrics');
+  const byDay=new Map();
+  for(let i=1;i<rows.length;i++){
+    const cells=rows[i];
+    if(cells.length!==header.length)throw Error('csv_column_count_mismatch_row_'+(i+1));
+    const rawDate=cells[idx.day];
+    const date=dateValue(rawDate);
+    // Summary/footer rows are skipped; malformed date-looking rows are rejected.
+    if(!date){
+      if(/合計|総計|total/i.test(String(rawDate)))continue;
+      throw Error('invalid_date_row_'+(i+1));
+    }
+    if(byDay.has(date))throw Error('duplicate_day_in_csv_'+date);
+    const out={jstDate:date,source:'rakuten_csv_period_daily',recordId:'period:'+date};
+    for(const key of ['clicks','orders','rewardYen']){
+      if(idx[key]>=0){
+        const value=nonnegative(cells[idx[key]],key);
+        if(value!==null)out[key]=value;
+      }
+    }
+    byDay.set(date,out);
+  }
+  if(!byDay.size)throw Error('no_valid_daily_rows');
+  return [...byDay.values()];
+}
+export function mergeDailySnapshot(existing, incoming) {
+  const records=Array.isArray(existing?.records)?existing.records:[];
+  const updated=new Map(incoming.map(r=>[r.jstDate,r]));
+  for(const row of records){
+    if(updated.has(row.jstDate)&&row.source!=='rakuten_csv_period_daily')
+      throw Error('conflicting_non_csv_results_for_'+row.jstDate);
+  }
+  return {records:[...records.filter(r=>!(r.source==='rakuten_csv_period_daily'&&updated.has(r.jstDate))),...incoming]};
+}
