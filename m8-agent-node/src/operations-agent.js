@@ -124,7 +124,10 @@ async function buildNightReport(day = dayKey()) {
   const errors = events.filter(x => /ERROR|REAUTH|FAILED/.test(String(x.type || '')));
   const accountInsights = await getAccountInsights(day);
   const postInsights = await getPostInsights(posts);
-  const status = !state.browserOk || replyFailed.length > 0 || postSummary.uncertainAttempts > 0 || eventCount(events, 'POST_ERROR') > 0 ? 'CAUTION' : 'NORMAL';
+  const apiRateLimited = events.some(e => e.type === 'RAKUTEN_PRODUCT_ERROR' && e.error === 'HTTP_429') ||
+    eventCount(events, 'RAKUTEN_RATE_LIMIT_COOLDOWN') > 0;
+  const status = !state.browserOk || replyFailed.length > 0 || postSummary.uncertainAttempts > 0 ||
+    eventCount(events, 'POST_ERROR') > 0 || apiRateLimited ? 'CAUTION' : 'NORMAL';
 
   const report = {
     version: 'm8-night-eval-v2-insights',
@@ -140,6 +143,8 @@ async function buildNightReport(day = dayKey()) {
       latestCandidateCount: candidates.length,
       latestEligibleCount: candidates.filter(x => x?.evaluation?.eligible).length,
       browserOk: state.browserOk ?? null,
+      rakutenRateLimitDetected: apiRateLimited,
+      rakutenCooldownUntil: state.lastRakutenRateLimitAt ? new Date(Date.parse(state.lastRakutenRateLimitAt) + 30 * 60000).toISOString() : null,
       lastThreadsScanAt: state.lastThreadsScanAt || null,
       lastPostAt: state.lastPostAt || null,
       lastExternalReplyAt: state.lastExternalReplyAt || null,
