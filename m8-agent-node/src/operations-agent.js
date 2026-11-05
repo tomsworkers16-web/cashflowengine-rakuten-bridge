@@ -163,6 +163,8 @@ async function buildNightReport(day = dayKey()) {
       threadsLinkClicks: accountInsights.metrics.clicks ?? 'unknown',
       followersCount: accountInsights.metrics.followers_count ?? 'unknown',
       conversions: affiliate.orders,
+      rakutenReportedSalesCount: affiliate.salesCount,
+      rakutenReportedSalesAmountYen: affiliate.salesAmountYen,
       reward: affiliate.rewardYen,
       rewardStatus: affiliate.rewardStatus,
       profit: affiliate.profitYen

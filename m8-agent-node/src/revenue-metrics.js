@@ -2,7 +2,7 @@
 // Input: {records:[{jstDate:"YYYY-MM-DD",source:"rakuten_dashboard",clicks:2,
 //   orders:1,rewardYen:80,costYen:0,itemCode:"shop:123"}]}
 // Optional metrics stay unknown unless at least one valid record for that day supplies them.
-const METRICS = ['clicks','orders','rewardYen','costYen'];
+const METRICS = ['clicks','orders','rewardYen','costYen','salesCount','salesAmountYen'];
 const dayRe = /^\d{4}-\d{2}-\d{2}$/;
 function numeric(v) { return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null; }
 export function summarizeAffiliateDay(document, jstDate) {

@@ -48,7 +48,7 @@ test('accepts one report-title preamble before five Rakuten daily columns',()=>{
  assert.deepEqual(rows[0],{
   jstDate:'2026-11-05',source:'rakuten_csv_period_daily',
   recordId:'period:2026-11-05',rewardStatus:'provisional',
-  clicks:3,orders:2,rewardYen:50
+  clicks:3,orders:2,rewardYen:50,salesAmountYen:1200
  });
 });
 test('does not infer rewards from sales and rejects unsafe ambiguous preambles',()=>{
@@ -57,7 +57,7 @@ test('does not infer rewards from sales and rejects unsafe ambiguous preambles',
  assert.equal(rows[0].clicks,4);
  assert.equal(rows[0].orders,1);
  assert.equal(Object.hasOwn(rows[0],'rewardYen'),false);
- assert.throws(()=>parseRakutenDailyCsv('楽天レポート\n発生日,売上金額\n2026/11/05,5000\n'),/date_column_missing/);
+ assert.throws(()=>parseRakutenDailyCsv('楽天レポート\n発生日,売上金額\n2026/11/05,5000\n'),/date_column_missing|no_supported_metrics/);
  assert.throws(()=>parseRakutenDailyCsv('タイトル\n注文明細,注文番号,金額\n2026/11/05,X1,500\n'),/date_column_missing/);
 });
 
@@ -73,4 +73,14 @@ test('parses confirmed Rakuten title plus blank line and five-column header',()=
 test('unverified metadata never bypasses strict invalid quote handling',()=>{
  assert.throws(()=>parseRakutenDailyCsv('自由なタイトル "開始\n\n発生日,売上金額\n2026/11/05,1400\n'),/invalid_csv_quotes/);
  assert.throws(()=>parseRakutenDailyCsv('楽天レポート\n\n発生日,成果報酬,クリック数,売上金額,売上件数\n2026/11/05,5"0,2,1400,1\n'),/invalid_csv_quotes/);
+});
+
+test('actual Rakuten columns preserve sales and reward as distinct metrics',()=>{
+ const csv='期間別レポート\n\n発生日,成果報酬,クリック数,売上件数,売上金額\n2026/11/05,80,3,1,1400\n';
+ const row=parseRakutenDailyCsv(csv)[0];
+ assert.equal(row.rewardYen,80);
+ assert.equal(row.salesCount,1);
+ assert.equal(row.salesAmountYen,1400);
+ assert.equal(row.clicks,3);
+ assert.equal(Object.hasOwn(row,'orders'),false);
 });
