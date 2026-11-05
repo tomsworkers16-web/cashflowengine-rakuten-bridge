@@ -127,5 +127,5 @@ export async function publishOne({dryRun=false}={}){
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  publishOne({dryRun:process.argv.includes('--dry-run')})
-  .catch(e=>{console.error(JSON.stringify({ok:false,error:e.message,postingPerformed:false}));process.exitCode=1;});
+  .catch(e=>{console.error(JSON.stringify({ok:false,error:e.message,postingOutcome:'check_posts_journal_if_publish_was_attempted'}));process.exitCode=1;});
 }
