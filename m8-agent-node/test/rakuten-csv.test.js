@@ -60,3 +60,12 @@ test('does not infer rewards from sales and rejects unsafe ambiguous preambles',
  assert.throws(()=>parseRakutenDailyCsv('楽天レポート\n発生日,売上金額\n2026/11/05,5000\n'),/date_column_missing/);
  assert.throws(()=>parseRakutenDailyCsv('タイトル\n注文明細,注文番号,金額\n2026/11/05,X1,500\n'),/date_column_missing/);
 });
+
+test('accepts real CSV structure after blank preamble',()=>{
+ const csv='期間別レポート\n\n発生日,成果報酬,クリック数,売上件数,売上金額\n2026/11/05,25,4,1,3000\n';
+ const rows=parseRakutenDailyCsv(csv);
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].rewardYen,25);
+ assert.equal(rows[0].clicks,4);
+ assert.equal(Object.hasOwn(rows[0],'orders'),false);
+});
