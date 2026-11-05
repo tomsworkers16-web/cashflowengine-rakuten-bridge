@@ -6,6 +6,7 @@ import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
+import { publishTextOnce } from './posting-guard.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -131,7 +132,7 @@ async function threadsToday() {
 }
 
 async function publishThreads(text) {
-  const p = await threads('/me/threads', { method: 'POST', params: { media_type: 'TEXT', text, auto_publish_text: 'true' }, attempts: 2 });
+  const p = await threads('/me/threads', { method: 'POST', params: { media_type: 'TEXT', text, auto_publish_text: 'true' }, attempts: 1 });
   if (!p?.id) throw new Error('threads_publish_no_id');
   return p.id;
 }
@@ -272,9 +273,28 @@ async function postFor(slot, { catchup = false } = {}) {
       state.imageFallbackUsed = true;
     }
   }
-  if (!id) id = await publishThreads(text);
-  const row = { at: new Date().toISOString(), jstDate: dayKey(), slot, id, text, meta: { ...meta, imageTemplate: id && state.lastImagePostResult === 'verified_posted' ? imageCard?.template : null } };
-  append(postsFile, row);
+  if (!id) {
+    const attempt = await publishTextOnce({
+      text, slot, jstDate: dayKey(), meta,
+      record: row => append(postsFile, row),
+      send: publishThreads,
+      lookup: threadsToday
+    });
+    if (attempt.status === 'uncertain') {
+      // A timeout can mean the post succeeded. Never retry this slot automatically.
+      state.lastDecision = 'text_publish_uncertain';
+      state.lastError = attempt.reason;
+      saveState();
+      event('TEXT_POST_UNCERTAIN', {slot, itemCode: meta.itemCode || null, reason: attempt.reason});
+      return;
+    }
+    id = attempt.id;
+  } else {
+    // Verified image publication, no text API fallback required.
+    append(postsFile, {at: new Date().toISOString(), jstDate: dayKey(), slot, id, text,
+      meta: {...meta, publishStatus:'verified_posted', imageTemplate:imageCard?.template}});
+  }
+  const row = { at: new Date().toISOString(), jstDate: dayKey(), slot, id, text, meta };
   Object.assign(state, { lastPostAt: row.at, lastPostId: id, lastDecision: 'posted', lastError: null });
   saveState(); event('POSTED', { id, slot, role: meta.role, itemCode: meta.itemCode || null, catchup });
 }
