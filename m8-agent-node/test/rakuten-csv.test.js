@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {parseRakutenDailyCsv, mergeDailySnapshot,parseCsv} from '../src/rakuten-csv.js';
+
+test('reads day-level Japanese Rakuten report with quoted currency and total line',()=>{
+  const rows=parseRakutenDailyCsv('\uFEFF日付,クリック数,注文件数,成果報酬額\r\n2026/11/04,"1,200",2,"¥160"\r\n2026/11/05,0,0,0\r\n合計,1200,2,160\r\n');
+  assert.equal(rows.length,2);
+  assert.deepEqual(rows[0],{jstDate:'2026-11-04',source:'rakuten_csv_period_daily',recordId:'period:2026-11-04',clicks:1200,orders:2,rewardYen:160});
+  assert.equal(rows[1].rewardYen,0);
+});
+
+test('accepts legitimate quoted comma and newlines, rejects malformed quotes',()=>{
+  assert.deepEqual(parseCsv('a,b\n"X,Y","line1\nline2"\n'),[['a','b'],['X,Y','line1\nline2']]);
+  assert.throws(()=>parseCsv('"unfinished'),/unterminated_csv_quote/);
+});
+
+test('does not assume unprovided counts or rewards are zero',()=>{
+  const rows=parseRakutenDailyCsv('日付,クリック数\n2026年11月05日,5\n');
+  assert.equal(rows[0].clicks,5);
+  assert.equal(Object.hasOwn(rows[0],'orders'),false);
+  assert.equal(Object.hasOwn(rows[0],'rewardYen'),false);
+});
+
+test('rejects order-detail CSV, invalid and duplicate dates rather than producing false totals',()=>{
+  assert.throws(()=>parseRakutenDailyCsv('注文番号,報酬額\nX001,50\n'),/date_column_missing/);
+  assert.throws(()=>parseRakutenDailyCsv('日付,クリック数\n2026/02/30,3\n'),/invalid_date/);
+  assert.throws(()=>parseRakutenDailyCsv('日付,クリック数\n2026/11/05,3\n2026/11/05,8\n'),/duplicate_day/);
+});
+
+test('a repeated daily export replaces the earlier snapshot rather than adding it',()=>{
+  const a=parseRakutenDailyCsv('日付,クリック数,成果報酬額\n2026/11/05,10,30\n');
+  const b=parseRakutenDailyCsv('日付,クリック数,成果報酬額\n2026/11/05,12,40\n');
+  const result=mergeDailySnapshot(mergeDailySnapshot(null,a),b);
+  assert.equal(result.records.length,1);
+  assert.equal(result.records[0].clicks,12);
+  assert.equal(result.records[0].rewardYen,40);
+});
+
+test('refuses other data sources for the same date rather than double counting',()=>{
+  assert.throws(()=>mergeDailySnapshot({records:[{source:'rakuten_dashboard',jstDate:'2026-11-05',rewardYen:60}]},
+    [{source:'rakuten_csv_period_daily',jstDate:'2026-11-05',rewardYen:60}]),/conflicting_non_csv/);
+});
