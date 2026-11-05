@@ -1,3 +1,11 @@
+// Verification must not match unrelated earlier posts with identical copy.
+export function postedNearAttempt(post, intentAt, maxMinutes = 20) {
+  const publishedAt = Date.parse(post?.timestamp || '');
+  const beganAt = Date.parse(intentAt || '');
+  if (!Number.isFinite(publishedAt) || !Number.isFinite(beganAt)) return false;
+  return publishedAt >= beganAt - 60_000 && publishedAt <= beganAt + maxMinutes * 60_000;
+}
+
 // Single-attempt publication with a durable intent journal.
 // Record is synchronous: a crash after a request was sent must not trigger an automatic retry.
 export async function publishTextOnce({ text, slot, jstDate, meta, record, send, lookup }) {
@@ -16,7 +24,7 @@ export async function publishTextOnce({ text, slot, jstDate, meta, record, send,
     try {
       const posts = await lookup();
       const match = Array.isArray(posts) && posts.find(p =>
-        p?.id && String(p.text || '').trim() === String(text).trim());
+        p?.id && String(p.text || '').trim() === String(text).trim() && postedNearAttempt(p, at));
       if (match) {
         record({at: new Date().toISOString(), jstDate, slot, id: match.id, text,
           meta: {...meta, publishStatus:'verified_posted'}});
@@ -34,8 +42,12 @@ export async function publishTextOnce({ text, slot, jstDate, meta, record, send,
 export function findRecoverablePosts(journal, officialPosts, day) {
   if (!Array.isArray(journal) || !Array.isArray(officialPosts)) return [];
   const latest = new Map();
+  const intentTimes = new Map();
   for (const row of journal) {
-    if (row?.jstDate === day && typeof row.slot === 'string' && row.slot) latest.set(row.slot, row);
+    if (row?.jstDate !== day || typeof row.slot !== 'string' || !row.slot) continue;
+    latest.set(row.slot, row);
+    if (row.meta?.publishStatus === 'pending' && !intentTimes.has(row.slot))
+      intentTimes.set(row.slot, row.at);
   }
   const uncertain = [...latest.values()].filter(row => !row?.id &&
     ['pending','uncertain','unverified'].includes(String(row?.meta?.publishStatus || '')) &&
@@ -52,7 +64,7 @@ export function findRecoverablePosts(journal, officialPosts, day) {
     const key = row.text.trim();
     if (counts.get(key) !== 1) continue;
     const found = officialPosts.filter(post => post?.id && String(post.text || '').trim() === key
-      && !knownIds.has(String(post.id)));
+      && !knownIds.has(String(post.id)) && postedNearAttempt(post, intentTimes.get(row.slot)));
     if (found.length !== 1) continue;
     const post = found[0];
     knownIds.add(String(post.id));
