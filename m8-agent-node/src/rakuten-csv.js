@@ -70,7 +70,7 @@ export function parseRakutenDailyCsv(csv) {
       throw Error('invalid_date_row_'+(i+1));
     }
     if(byDay.has(date))throw Error('duplicate_day_in_csv_'+date);
-    const out={jstDate:date,source:'rakuten_csv_period_daily',recordId:'period:'+date};
+    const out={jstDate:date,source:'rakuten_csv_period_daily',recordId:'period:'+date,rewardStatus:'provisional'};
     for(const key of ['clicks','orders','rewardYen']){
       if(idx[key]>=0){
         const value=nonnegative(cells[idx[key]],key);

@@ -155,6 +155,7 @@ async function buildNightReport(day = dayKey()) {
       followersCount: accountInsights.metrics.followers_count ?? 'unknown',
       conversions: affiliate.orders,
       reward: affiliate.rewardYen,
+      rewardStatus: affiliate.rewardStatus,
       profit: affiliate.profitYen
     },
     affiliateResults: affiliate,

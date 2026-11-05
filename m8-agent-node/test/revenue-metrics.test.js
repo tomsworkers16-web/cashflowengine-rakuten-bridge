@@ -11,7 +11,7 @@ test('missing evidence is unknown, not zero earnings',()=>{
   assert.equal(v.profitYen,'unknown');
 });
 test('zero is valid only if explicitly supplied',()=>{
-  const v=summarizeAffiliateDay({records:[{jstDate:day,source:'rakuten_dashboard',clicks:0,orders:0,rewardYen:0,costYen:0}]},day);
+  const v=summarizeAffiliateDay({records:[{jstDate:day,source:'rakuten_dashboard',rewardStatus:'confirmed',clicks:0,orders:0,rewardYen:0,costYen:0}]},day);
   assert.equal(v.rewardYen,0);assert.equal(v.profitYen,0);assert.equal(v.conversionRate,'unknown');
 });
 test('daily aggregation excludes other dates and preserves missing costs',()=>{
@@ -24,7 +24,7 @@ test('daily aggregation excludes other dates and preserves missing costs',()=>{
   assert.equal(v.byItemReported[0].itemCode,'shop:123');
 });
 test('rejects negative and stringified amounts instead of fabricating metrics',()=>{
-  const v=summarizeAffiliateDay({records:[{jstDate:day,source:'rakuten_dashboard',clicks:'20',orders:-1,rewardYen:70,costYen:10}]},day);
+  const v=summarizeAffiliateDay({records:[{jstDate:day,source:'rakuten_dashboard',rewardStatus:'confirmed',clicks:'20',orders:-1,rewardYen:70,costYen:10}]},day);
   assert.equal(v.clicks,'unknown');assert.equal(v.orders,'unknown');assert.equal(v.profitYen,60);
 });
 
@@ -42,4 +42,16 @@ test('the same record ID from separate sources is not improperly collapsed',()=>
   const v=summarizeAffiliateDay({records:[{...record,source:'rakuten_dashboard'},{...record,source:'another_provider'}]},day);
   assert.equal(v.orders,2);
   assert.equal(v.duplicateRecordsIgnored,0);
+});
+
+test('provisional report is never represented as realized net profit',()=>{
+  const v=summarizeAffiliateDay({records:[{jstDate:day,source:'rakuten_csv_period_daily',rewardStatus:'provisional',rewardYen:250,costYen:40}]},day);
+  assert.equal(v.rewardYen,250);
+  assert.equal(v.rewardStatus,'provisional');
+  assert.equal(v.profitYen,'unknown');
+});
+test('unspecified evidence status is not presumed confirmed',()=>{
+  const v=summarizeAffiliateDay({records:[{jstDate:day,source:'unknown_source',rewardYen:20,costYen:0}]},day);
+  assert.equal(v.rewardStatus,'unknown');
+  assert.equal(v.profitYen,'unknown');
 });

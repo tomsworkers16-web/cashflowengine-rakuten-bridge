@@ -26,8 +26,14 @@ export function summarizeAffiliateDay(document, jstDate) {
     const present = records.map(r => numeric(r[name])).filter(v => v !== null);
     values[name] = present.length > 0 ? present.reduce((a,b)=>a+b,0) : 'unknown';
   }
-  // If costs or earnings are not reported, zero may NOT be silently assumed.
-  const profitYen = typeof values.rewardYen === 'number' && typeof values.costYen === 'number'
+  // An order report may show provisional rewards which can later be reversed.
+  const rewardRows = records.filter(r => numeric(r.rewardYen) !== null);
+  const rewardStatus = rewardRows.length === 0 ? 'unknown'
+    : rewardRows.every(r => r.rewardStatus === 'confirmed') ? 'confirmed'
+    : rewardRows.some(r => r.rewardStatus === 'provisional') ? 'provisional' : 'unknown';
+  // "profitYen" denotes confirmed net profit only. Pending commissions are not cash.
+  const profitYen = rewardStatus === 'confirmed' &&
+    typeof values.rewardYen === 'number' && typeof values.costYen === 'number'
     ? values.rewardYen - values.costYen : 'unknown';
   const conversionRate = typeof values.orders === 'number' && typeof values.clicks === 'number' && values.clicks > 0
     ? values.orders / values.clicks : 'unknown';
@@ -37,6 +43,6 @@ export function summarizeAffiliateDay(document, jstDate) {
   return { dataStatus: records.length ? 'partial_or_reported' : 'not_reported',
     reportSources:[...new Set(records.map(r=>r.source.trim()))], recordCount:records.length,
     duplicateRecordsIgnored,
-    ...values, profitYen, conversionRate, byItemReported:details,
+    ...values, rewardStatus, profitYen, conversionRate, byItemReported:details,
     caveat:'Affiliate data is source-reported; per-post attribution is unproven without tracking identifiers.' };
 }
