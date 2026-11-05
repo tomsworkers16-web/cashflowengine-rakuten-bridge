@@ -40,3 +40,23 @@ test('refuses other data sources for the same date rather than double counting',
   assert.throws(()=>mergeDailySnapshot({records:[{source:'rakuten_dashboard',jstDate:'2026-11-05',rewardYen:60}]},
     [{source:'rakuten_csv_period_daily',jstDate:'2026-11-05',rewardYen:60}]),/conflicting_non_csv/);
 });
+
+test('accepts one report-title preamble before five Rakuten daily columns',()=>{
+ const csv='期間別レポート（日別）\n発生日,成果件数,クリック数,売上金額,成果報酬\n2026/11/05,2,3,1200,50\n';
+ const rows=parseRakutenDailyCsv(csv);
+ assert.equal(rows.length,1);
+ assert.deepEqual(rows[0],{
+  jstDate:'2026-11-05',source:'rakuten_csv_period_daily',
+  recordId:'period:2026-11-05',rewardStatus:'provisional',
+  clicks:3,orders:2,rewardYen:50
+ });
+});
+test('does not infer rewards from sales and rejects unsafe ambiguous preambles',()=>{
+ const rows=parseRakutenDailyCsv('楽天レポート\n発生日,成果件数,クリック数,売上金額,売上件数\n2026/11/05,1,4,9000,2\n');
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].clicks,4);
+ assert.equal(rows[0].orders,1);
+ assert.equal(Object.hasOwn(rows[0],'rewardYen'),false);
+ assert.throws(()=>parseRakutenDailyCsv('楽天レポート\n発生日,売上金額\n2026/11/05,5000\n'),/date_column_missing/);
+ assert.throws(()=>parseRakutenDailyCsv('タイトル\n注文明細,注文番号,金額\n2026/11/05,X1,500\n'),/date_column_missing/);
+});
