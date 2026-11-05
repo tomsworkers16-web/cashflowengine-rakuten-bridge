@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -47,4 +47,13 @@ test('detects transient navigation context destruction without retrying other fa
  assert.equal(isTransientNavigationError(new Error('Frame was detached')),true);
  assert.equal(isTransientNavigationError(new Error('Timeout 20000ms exceeded')),false);
  assert.equal(isTransientNavigationError(new Error('CSV invalid')),false);
+});
+
+test('guarded daily report export buttons must be uniquely matched and enabled',()=>{
+ const buttons=[{text:'日別',disabled:false},{text:'月別',disabled:false},
+  {text:'ダウンロード',disabled:false},{text:'ダウンロード',disabled:true}];
+ assert.deepEqual(exactButtonIndices(buttons,'日別'),[0]);
+ assert.deepEqual(exactButtonIndices(buttons,'ダウンロード'),[2]);
+ assert.deepEqual(exactButtonIndices(buttons,'CSV'),[]);
+ assert.deepEqual(exactButtonIndices([{text:'ダウンロード'},{text:'ダウンロード'}],'ダウンロード'),[0,1]);
 });
