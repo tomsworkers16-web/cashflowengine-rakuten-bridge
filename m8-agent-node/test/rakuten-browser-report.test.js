@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -77,4 +77,14 @@ test('CSV download link must stay on official Rakuten report origin',()=>{
  assert.equal(isSafeRakutenExportLink('javascript:alert(1)'),false);
  assert.equal(isSafeRakutenExportLink('https://affiliate.rakuten.co.jp.evil.test/report/'),false);
  assert.equal(isSafeRakutenExportLink('http://affiliate.rakuten.co.jp/report/'),false);
+});
+
+test('safe report diagnostics identify stage and errors without leaking private data',()=>{
+ const failure=diagnoseRakutenCaptureFailure(new Error(
+  'date_column_missing: user token=secret; C:\\Users\\private\\Downloads'), 'validate_downloaded_csv');
+ assert.deepEqual(failure,{stage:'validate_downloaded_csv',code:'downloaded_csv_format_not_supported'});
+ assert.equal(JSON.stringify(failure).includes('secret'),false);
+ assert.equal(diagnoseRakutenCaptureFailure(new Error('locator.click: Timeout 18000ms exceeded'),'click_csv_link').code,'timeout');
+ assert.equal(diagnoseRakutenCaptureFailure(new Error('Unrecognized unknown problem'),'save_download_file').code,'unclassified');
+ assert.equal(diagnoseRakutenCaptureFailure(new Error('EACCES: permission denied'),'save_download_file').code,'local_file_access');
 });

@@ -166,6 +166,21 @@ export function captureValidatedCsv(downloadDir,bytes,{filename='rakuten-report.
  return {filename:path.basename(destination),sourceFilename:String(filename).slice(0,90),
   days:evidence.days};
 }
+// Report safe, actionable diagnostics without exposing page contents, tokens or paths.
+export function diagnoseRakutenCaptureFailure(error, stage='unknown'){
+ const msg=String(error?.message||'');
+ let code='unclassified';
+ if(/locator.*(strict mode violation|resolved to .* elements)/i.test(msg))code='ambiguous_locator';
+ else if(/Timeout|exceeded|timed out/i.test(msg))code='timeout';
+ else if(/Execution context was destroyed|Frame was detached|navigation/i.test(msg))code='page_navigation_race';
+ else if(/Target page, context or browser has been closed/i.test(msg))code='browser_closed';
+ else if(/invalid_csv|date_column_missing|no_data_rows|no_supported_metrics|invalid_date_row|csv_column_count_mismatch|duplicate_day_in_csv|no_valid_daily_rows|invalid_clicks|invalid_orders|invalid_rewardYen/i.test(msg))
+  code='downloaded_csv_format_not_supported';
+ else if(/download_is_not_csv/i.test(msg))code='download_file_not_csv';
+ else if(/EACCES|EPERM|ENOENT|EEXIST/i.test(msg))code='local_file_access';
+ else if(/VirtualAlloc failed|new_pages != nullptr|low_level_alloc/i.test(msg))code='chrome_virtual_memory_exhausted';
+ return {stage,code};
+}
 async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env.CFE_DATA_DIR||'.data'),
   downloadDir=process.env.RAKUTEN_REPORT_DOWNLOAD_DIR||path.resolve(process.cwd(),'.data/rakuten-browser-exports'),
   interactive=false}={}){
@@ -176,11 +191,15 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   message:'楽天レポート用Chromeを起動しません。Windowsの仮想メモリ設定を確認してください。'};
  const chrome=executable();assert(chrome,'chrome_not_found');
  const profile=path.resolve(dataDir,'rakuten-report-chrome-profile');
+ let stage='launch_browser';
+ let exportClicked=false;
+ try {
  const context=await chromium.launchPersistentContext(profile,{
   executablePath:chrome,headless:!interactive,acceptDownloads:true,
   viewport:{width:1440,height:960},args:['--disable-blink-features=AutomationControlled']
  });
  try {
+  stage='navigate_report';
   const page=context.pages()[0]||await context.newPage();
   // Fixed official URL; no unverified third-party navigation.
   await page.goto(REPORT_URL,{waitUntil:'domcontentloaded',timeout:60000});
@@ -197,10 +216,12 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   if(classification!=='report')
    return {mode,status:'login_or_unexpected_page',pageType:classification,
     noDownload:true,noPosting:true};
+  stage='select_period_tab';
   const tabResult=await selectPeriodReport(page);
   if(!tabResult.selected)
    return {mode,status:tabResult.status,pageType:'report',diagnostic:tabResult.diagnostic||null,controls:await readControls(page),
     noDownload:true,noPosting:true};
+  stage='inspect_report_controls';
   const controls=await readControls(page);
   if(mode==='inspect')
    return {mode,status:'period_report_accessible',pageType:'report',tab:'期間別',
@@ -209,20 +230,24 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     message:'期間別画面の操作部品を確認しました。CSVが1件だけ特定できたときのみ別コマンドで取得できます。'};
   // Confirmed live UI: 期間別 -> 日別 -> ダウンロード -> CSV (link).
   // At most one click per control. No retries of download actions.
+  stage='select_daily_report';
   const daily=await clickUniqueNativeButton(page,'日別');
   if(!daily.clicked)return {mode,status:'daily_tab_unverified',
     diagnostic:daily,noDownload:true,noPosting:true};
   await page.waitForTimeout(800);
   if(classifyRakutenReportPage(page.url())!=='report')
    return {mode,status:'report_navigation_changed',noDownload:true,noPosting:true};
+  stage='locate_download_menu';
   const downloadButtons=await periodTabCandidates(page);
   const matches=exactButtonIndices(downloadButtons,'ダウンロード');
   if(matches.length!==1)return {mode,status:'download_control_unverified',
     count:matches.length,controls:await readControls(page),noDownload:true,noPosting:true};
   const selected=downloadButtons[matches[0]];
+  stage='open_download_menu';
   await page.locator('button').nth(selected.index).click({timeout:BROWSER_WAIT_MS});
   // Menu links may be mounted after the click; inspect only until one CSV link
   // appears, then click it exactly once.
+  stage='locate_csv_link';
   let links=[],csv=[];
   for(let attempt=0;attempt<8;attempt++){
    links=await csvMenuLinkCandidates(page);
@@ -235,21 +260,27 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   const link=links[csv[0]];
   if(!isSafeRakutenExportLink(link.href))
    return {mode,status:'untrusted_csv_export_destination',noDownload:true,noPosting:true};
+  stage='click_csv_link';
   const downloadPromise=page.waitForEvent('download',{timeout:DOWNLOAD_TIMEOUT_MS}).catch(()=>null);
+  exportClicked=true;
   await page.locator('a').nth(link.index).click({timeout:BROWSER_WAIT_MS});
   const download=await downloadPromise;
   if(!download)return {mode,status:'csv_export_no_file',noDownload:true,noPosting:true,
    message:'CSVリンクを一度クリックしましたが、ファイルが届きませんでした。自動再試行しません。'};
+  stage='check_download_file';
   const suggested=download.suggestedFilename();
   assert(/\.csv$/i.test(suggested),'download_is_not_csv');
   const temp=path.resolve(dataDir,'rakuten-download-temp');
   fs.mkdirSync(temp,{recursive:true});
   const saved=path.join(temp,'capture-'+Date.now()+'-'+process.pid+'.csv');
   try{
+   stage='save_download_file';
    await download.saveAs(saved);
+   stage='validate_downloaded_csv';
    const result=captureValidatedCsv(downloadDir,fs.readFileSync(saved),{filename:suggested});
    // Explicit download was requested; import only this validated CSV now.
    // Keep the original saved CSV for inspection/re-import if actual headers differ.
+   stage='import_validated_csv';
    const imported=importRakutenReportFiles(dataDir,[path.join(downloadDir,result.filename)]);
    if(imported.failures.length)
     return {mode,status:'csv_saved_import_failed',...result,
@@ -258,6 +289,13 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     imported:imported.imported,noPosting:true};
   }finally{fs.rmSync(saved,{force:true});}
  }finally{await context.close();}
+ }catch(error){
+  const diagnostic=diagnoseRakutenCaptureFailure(error,stage);
+  return {mode,status:'capture_failed',diagnostic,
+   exportClicked,noPosting:true,
+   noDownload:!exportClicked,
+   message:'楽天レポートの処理が停止しました。診断コードを確認してください。'};
+ }
 }
 export {inspectOrCapture};
 const isMain=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
