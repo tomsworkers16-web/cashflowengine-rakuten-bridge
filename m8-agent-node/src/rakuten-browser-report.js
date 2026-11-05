@@ -103,6 +103,20 @@ async function selectPeriodReport(page){
   return {selected:false,status:'report_navigation_changed'};
  return {selected:true,status:'period_tab_selected'};
 }
+// Distinguish the day-level export from the month-level report. Refuse
+// ambiguous controls and never try an order-detail or confirmed-reward tab.
+export function exactButtonIndices(buttons,label){
+ return buttons.map((b,i)=>b.text===label&&!b.disabled?i:-1).filter(i=>i>=0);
+}
+async function clickUniqueNativeButton(page,label){
+ const buttons=await periodTabCandidates(page);
+ const matches=exactButtonIndices(buttons,label);
+ if(matches.length!==1)return {clicked:false,status:'button_not_unique',
+  label,count:matches.length};
+ const button=buttons[matches[0]];
+ await page.locator('button').nth(button.index).click({timeout:BROWSER_WAIT_MS});
+ return {clicked:true,label};
+}
 async function inspectPeriodFields(page){
  return readWhenSettled(page,()=>page.locator('select,input,[role="combobox"]').evaluateAll(elements=>
   elements.filter(e=>e.getClientRects().length>0).slice(0,35).map(e=>({
@@ -175,23 +189,26 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     controls,fields:await inspectPeriodFields(page),
     noDownload:true,noPosting:true,
     message:'期間別画面の操作部品を確認しました。CSVが1件だけ特定できたときのみ別コマンドで取得できます。'};
-  // Very restrictive automatic capture: visible single CSV-labeled button/link only.
-  // If ambiguous or absent, do not click unknown links or icons.
-  const candidates=page.getByRole('button',{name:/CSV|ダウンロード/i});
-  const linkCandidates=page.getByRole('link',{name:/CSV.*ダウンロード|ダウンロード.*CSV/i});
-  const count=(await candidates.count())+(await linkCandidates.count());
-  if(count!==1)return {mode,status:'csv_control_unverified',count,
-    controls,noDownload:true,noPosting:true};
-  const control=(await candidates.count())===1?candidates.first():linkCandidates.first();
-  const label=String(await control.getAttribute('aria-label')||
-    await control.innerText().catch(()=>'' )).slice(0,100);
-  // CSV must be explicitly visible in the control label to prevent clicking unrelated exports.
-  if(!/csv/i.test(label))return {mode,status:'csv_label_not_verified',
-    noDownload:true,noPosting:true};
-  const [download]=await Promise.all([
-    page.waitForEvent('download',{timeout:DOWNLOAD_TIMEOUT_MS}),
-    control.click({timeout:BROWSER_WAIT_MS})
-  ]);
+  // Observed in the authenticated M8 UI: 期間別 -> 日別 -> ダウンロード.
+  // The last button may open a menu instead of downloading directly. Click it
+  // at most once. If no file appears, inspect the menu without further clicks.
+  const daily=await clickUniqueNativeButton(page,'日別');
+  if(!daily.clicked)return {mode,status:'daily_tab_unverified',
+    diagnostic:daily,noDownload:true,noPosting:true};
+  await page.waitForTimeout(800);
+  if(classifyRakutenReportPage(page.url())!=='report')
+   return {mode,status:'report_navigation_changed',noDownload:true,noPosting:true};
+  const downloadButtons=await periodTabCandidates(page);
+  const matches=exactButtonIndices(downloadButtons,'ダウンロード');
+  if(matches.length!==1)return {mode,status:'download_control_unverified',
+    count:matches.length,controls:await readControls(page),noDownload:true,noPosting:true};
+  const selected=downloadButtons[matches[0]];
+  const downloadEvent=page.waitForEvent('download',{timeout:7000}).catch(()=>null);
+  await page.locator('button').nth(selected.index).click({timeout:BROWSER_WAIT_MS});
+  const download=await downloadEvent;
+  if(!download)return {mode,status:'download_control_opened_no_file',
+   controls:await readControls(page),noDownload:true,noPosting:true,
+   message:'ダウンロードボタンを1回だけ押しました。ファイルが発生しなかったため、追加操作は行っていません。'};
   const suggested=download.suggestedFilename();
   assert(/\.csv$/i.test(suggested),'download_is_not_csv');
   const temp=path.resolve(dataDir,'rakuten-download-temp');
