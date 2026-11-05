@@ -27,3 +27,19 @@ test('rejects negative and stringified amounts instead of fabricating metrics',(
   const v=summarizeAffiliateDay({records:[{jstDate:day,source:'rakuten_dashboard',clicks:'20',orders:-1,rewardYen:70,costYen:10}]},day);
   assert.equal(v.clicks,'unknown');assert.equal(v.orders,'unknown');assert.equal(v.profitYen,60);
 });
+
+test('repeated imports with stable source record IDs are not double counted',()=>{
+  const record={jstDate:day,source:'rakuten_dashboard',recordId:'order-101',clicks:1,orders:1,rewardYen:80,costYen:0};
+  const v=summarizeAffiliateDay({records:[record,{...record}]},day);
+  assert.equal(v.recordCount,1);
+  assert.equal(v.duplicateRecordsIgnored,1);
+  assert.equal(v.orders,1);
+  assert.equal(v.rewardYen,80);
+});
+
+test('the same record ID from separate sources is not improperly collapsed',()=>{
+  const record={jstDate:day,recordId:'report-1',orders:1,rewardYen:50,costYen:0};
+  const v=summarizeAffiliateDay({records:[{...record,source:'rakuten_dashboard'},{...record,source:'another_provider'}]},day);
+  assert.equal(v.orders,2);
+  assert.equal(v.duplicateRecordsIgnored,0);
+});
