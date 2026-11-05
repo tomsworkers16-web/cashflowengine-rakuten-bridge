@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publishTextOnce } from '../src/posting-guard.js';
+import { publishTextOnce, findRecoverablePosts } from '../src/posting-guard.js';
 
 const args = (overrides = {}) => ({
   text:'【PR】商品はこちら', slot:'12:30',jstDate:'2026-11-05',
@@ -63,4 +63,29 @@ test('failed intent journal stops all network activity', async () => {
     lookup:async()=>[]
   })),/disk_full/);
   assert.equal(sent,0);
+});
+
+test('uncertain post is recovered from official timeline without posting',()=>{
+  const row={jstDate:'2026-11-05',slot:'12:30',id:null,text:'unique copy',meta:{publishStatus:'uncertain'}};
+  const found=findRecoverablePosts([row],[{id:'official-1',text:'unique copy'}],'2026-11-05');
+  assert.equal(found.length,1);assert.equal(found[0].id,'official-1');
+  assert.equal(found[0].meta.publishStatus,'verified_posted');
+});
+
+test('ambiguous duplicate matching text is not reconciled',()=>{
+  const a={jstDate:'2026-11-05',slot:'07:30',id:null,text:'same',meta:{publishStatus:'pending'}};
+  const b={...a,slot:'12:30'};
+  assert.deepEqual(findRecoverablePosts([a,b],[{id:'x',text:'same'}],'2026-11-05'),[]);
+});
+
+test('existing successful post IDs are never reused for reconciliation',()=>{
+  const p={jstDate:'2026-11-05',slot:'07:30',id:'x',text:'one',meta:{publishStatus:'posted'}};
+  const q={jstDate:'2026-11-05',slot:'12:30',id:null,text:'same',meta:{publishStatus:'uncertain'}};
+  assert.deepEqual(findRecoverablePosts([p,q],[{id:'x',text:'same'}],'2026-11-05'),[]);
+});
+
+test('resolved slots are not reconciled repeatedly',()=>{
+  const row={jstDate:'2026-11-05',slot:'12:30',id:null,text:'text',meta:{publishStatus:'uncertain'}};
+  const done={...row,id:'confirmed',meta:{publishStatus:'verified_posted'}};
+  assert.deepEqual(findRecoverablePosts([row,done],[{id:'confirmed',text:'text'}],'2026-11-05'),[]);
 });
