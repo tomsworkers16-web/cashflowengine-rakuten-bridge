@@ -51,5 +51,7 @@ jobs:
         run: npm run check-secrets
       - name: JavaScript syntax checks
         run: npm run check
+      - name: Install runtime packages for end-to-end tests
+        run: npm install --ignore-scripts --no-audit --no-fund
       - name: Offline safety tests (no credentials, no posting)
         run: npm test
