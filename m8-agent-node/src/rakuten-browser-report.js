@@ -27,18 +27,39 @@ export function classifyRakutenReportPage(url) {
    return 'authentication_or_navigation';
  return 'untrusted_origin';
 }
+// Rakuten may redirect or hydrate while Playwright is reading the DOM.
+// Retry read-only inspections only; never repeat clicks or downloads.
+export function isTransientNavigationError(error){
+ const message=String(error?.message||'');
+ return /Execution context was destroyed|Cannot find context with specified id|Frame was detached|navigation|Target page, context or browser has been closed/i.test(message)
+  && !/Timeout/i.test(message);
+}
+async function readWhenSettled(page, operation, attempts=8){
+ let last;
+ for(let i=0;i<attempts;i++){
+  try{return await operation();}
+  catch(e){
+   if(!isTransientNavigationError(e))throw e;
+   last=e;
+   if(page.isClosed())throw e;
+   await page.waitForLoadState('domcontentloaded',{timeout:5000}).catch(()=>{});
+   await page.waitForTimeout(450);
+  }
+ }
+ throw last;
+}
 function sanitizeControls(controls){
  return controls.filter(x=>typeof x?.text==='string'&&x.text.trim())
  .map(x=>({tag:String(x.tag||'').slice(0,12),
    text:x.text.replace(/\s+/g,' ').trim().slice(0,75)})).slice(0,45);
 }
 async function readControls(page){
- return page.locator('button,a,[role="button"]').evaluateAll(elements=>
+ return readWhenSettled(page,()=>page.locator('button,a,[role="button"]').evaluateAll(elements=>
   elements.filter(e=>e.getClientRects().length>0).slice(0,120).map(e=>({
    tag:e.tagName.toLowerCase(),
    text:(e.getAttribute('aria-label')||e.innerText||e.getAttribute('title')||'').trim()
   }))
- ).then(sanitizeControls);
+ ).then(sanitizeControls));
 }
 // Only use the uniquely identified period-by-day report tab. Never select
 // order-detail or confirmed-reward tabs by guessing at similar labels.
@@ -52,11 +73,11 @@ export function selectPeriodButtonIndices(buttons){
  return buttons.map((b,i)=>isPeriodTabLabel(b.text)?i:-1).filter(i=>i>=0);
 }
 async function periodTabCandidates(page){
- return page.locator('button').evaluateAll(buttons=>buttons.map((b,index)=>({
+ return readWhenSettled(page,()=>page.locator('button').evaluateAll(buttons=>buttons.map((b,index)=>({
   index, visible:Boolean(b.getClientRects().length),
   text:(b.innerText||b.textContent||'').replace(/\s+/g,' ').trim(),
   disabled:b.disabled
- })).filter(b=>b.visible&&b.text));
+ })).filter(b=>b.visible&&b.text)));
 }
 async function selectPeriodReport(page){
  let controls=[];
@@ -82,7 +103,7 @@ async function selectPeriodReport(page){
  return {selected:true,status:'period_tab_selected'};
 }
 async function inspectPeriodFields(page){
- return page.locator('select,input,[role="combobox"]').evaluateAll(elements=>
+ return readWhenSettled(page,()=>page.locator('select,input,[role="combobox"]').evaluateAll(elements=>
   elements.filter(e=>e.getClientRects().length>0).slice(0,35).map(e=>({
    tag:e.tagName.toLowerCase(),type:(e.getAttribute('type')||'').slice(0,20),
    label:(e.getAttribute('aria-label')||e.labels?.[0]?.innerText||e.getAttribute('placeholder')||'')
@@ -90,7 +111,7 @@ async function inspectPeriodFields(page){
    options:e.tagName.toLowerCase()==='select'
     ?Array.from(e.options).slice(0,12).map(o=>o.textContent.trim().slice(0,35)):undefined
   }))
- );
+ ));
 }
 function assertCsv(bytes){
  assert(bytes.length>0&&bytes.length<=5*1024*1024,'invalid_csv_size');
