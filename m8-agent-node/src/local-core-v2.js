@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
-import { publishTextOnce } from './posting-guard.js';
+import { publishTextOnce, findRecoverablePosts } from './posting-guard.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -307,6 +307,19 @@ async function postingTick() {
   try {
     if (!AUTO_POST_ENABLED) { state.lastDecision = 'disabled'; saveState(); return; }
     await threadsHealth();
+    // Recover uncertain post IDs from the official timeline without resubmitting content.
+    try {
+      const journal = todayLocalPosts();
+      if (journal.some(x => !x.id && ['pending','uncertain','unverified'].includes(String(x.meta?.publishStatus || '')))) {
+        const matches = findRecoverablePosts(journal, await threadsToday(), dayKey());
+        for (const row of matches) {
+          append(postsFile, row);
+          event('POST_RECONCILED', {slot:row.slot, id:row.id});
+        }
+      }
+    } catch (e) {
+      event('POST_RECONCILE_ERROR', {error:e.message});
+    }
     const s = dueSlot();
     if (s) { await postFor(s); saveState(); return; }
     if (CATCH_UP) {

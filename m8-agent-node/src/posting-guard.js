@@ -30,3 +30,34 @@ export async function publishTextOnce({ text, slot, jstDate, meta, record, send,
     return {status:'uncertain', id:null, reason: error?.message || 'publish_outcome_unknown'};
   }
 }
+
+export function findRecoverablePosts(journal, officialPosts, day) {
+  if (!Array.isArray(journal) || !Array.isArray(officialPosts)) return [];
+  const latest = new Map();
+  for (const row of journal) {
+    if (row?.jstDate === day && typeof row.slot === 'string' && row.slot) latest.set(row.slot, row);
+  }
+  const uncertain = [...latest.values()].filter(row => !row?.id &&
+    ['pending','uncertain','unverified'].includes(String(row?.meta?.publishStatus || '')) &&
+    String(row?.text || '').trim());
+  // Identical copy in multiple unresolved slots cannot be unambiguously attributed.
+  const counts = new Map();
+  for (const row of uncertain) {
+    const key = row.text.trim();
+    counts.set(key,(counts.get(key) || 0) + 1);
+  }
+  const knownIds = new Set(journal.filter(x => x?.id).map(x => String(x.id)));
+  const matches = [];
+  for (const row of uncertain) {
+    const key = row.text.trim();
+    if (counts.get(key) !== 1) continue;
+    const found = officialPosts.filter(post => post?.id && String(post.text || '').trim() === key
+      && !knownIds.has(String(post.id)));
+    if (found.length !== 1) continue;
+    const post = found[0];
+    knownIds.add(String(post.id));
+    matches.push({ ...row, at:new Date().toISOString(), id:post.id,
+      meta:{...row.meta,publishStatus:'verified_posted',reconciledFrom:'official_timeline'} });
+  }
+  return matches;
+}
