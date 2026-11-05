@@ -59,7 +59,7 @@ async function inspectPeriodFields(page){
   elements.filter(e=>e.getClientRects().length>0).slice(0,35).map(e=>({
    tag:e.tagName.toLowerCase(),type:(e.getAttribute('type')||'').slice(0,20),
    label:(e.getAttribute('aria-label')||e.labels?.[0]?.innerText||e.getAttribute('placeholder')||'')
-    .replace(/\\s+/g,' ').trim().slice(0,65),
+    .replace(/\s+/g,' ').trim().slice(0,65),
    options:e.tagName.toLowerCase()==='select'
     ?Array.from(e.options).slice(0,12).map(o=>o.textContent.trim().slice(0,35)):undefined
   }))
