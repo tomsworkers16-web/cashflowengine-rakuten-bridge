@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -40,4 +40,11 @@ test('visible native button text maps to exact period tab even when accessible n
  assert.deepEqual(selectPeriodButtonIndices(buttons),[1]);
  assert.deepEqual(selectPeriodButtonIndices([{text:'期間別 CSV'},{text:'期間別レポート'}]),[]);
  assert.deepEqual(selectPeriodButtonIndices([{text:'期間別'},{text:'期間別'}]),[0,1]);
+});
+
+test('detects transient navigation context destruction without retrying other failures',()=>{
+ assert.equal(isTransientNavigationError(new Error('locator.evaluateAll: Execution context was destroyed, most likely because of a navigation')),true);
+ assert.equal(isTransientNavigationError(new Error('Frame was detached')),true);
+ assert.equal(isTransientNavigationError(new Error('Timeout 20000ms exceeded')),false);
+ assert.equal(isTransientNavigationError(new Error('CSV invalid')),false);
 });
