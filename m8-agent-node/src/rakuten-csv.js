@@ -59,7 +59,7 @@ export function stripVerifiedDailyReportPreamble(csv) {
   let cells;
   try{cells=parseCsv(lines[i]);}catch{continue;}
   if(cells.length<3||cells.length>30)continue;
-  const normalized=cells[0].map(norm);
+  const normalized=cells.map(norm);
   const count=(key)=>normalized.filter(h=>HEADERS[key].some(alias=>norm(alias)===h)).length;
   if(count('day')!==1)continue;
   if(['clicks','orders','rewardYen'].filter(key=>count(key)===1).length<2)continue;
