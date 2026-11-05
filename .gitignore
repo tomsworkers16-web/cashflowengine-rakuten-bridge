@@ -1,0 +1,24 @@
+# Do not commit credentials, session profiles, local business data or logs.
+.env
+.env.*
+!.env.example
+!.env.sample
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
+.data/
+**/.data/
+node_modules/
+**/node_modules/
+*.log
+*.tmp
+*.sqlite
+*.sqlite3
+*.db
+*.pem
+*.key
+*credentials*.json
+*secrets*.json
+affiliate-results.json
+**/affiliate-results.json

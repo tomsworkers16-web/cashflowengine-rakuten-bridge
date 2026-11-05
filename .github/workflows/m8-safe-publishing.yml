@@ -8,6 +8,7 @@ on:
       - 'm8-agent-node/test/**'
       - 'm8-agent-node/package.json'
       - '.github/workflows/m8-safe-publishing.yml'
+      - '.gitignore'
   pull_request:
     paths:
       - 'm8-agent-node/src/**'
@@ -33,6 +34,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+      - name: Check no secrets or local business data are tracked
+        run: npm run check-secrets
       - name: JavaScript syntax checks
         run: npm run check
       - name: Offline safety tests (no credentials, no posting)
