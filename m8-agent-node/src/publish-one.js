@@ -2,7 +2,7 @@
 // Run: npm.cmd run publish-one. No retries of a publish request, even on timeout.
 import fs from 'node:fs';
 import path from 'node:path';
-import {URL} from 'node:url';
+import {URL,fileURLToPath} from 'node:url';
 import { revenueText } from './product-posting.js';
 import { publishTextOnce } from './posting-guard.js';
 
@@ -125,7 +125,7 @@ export async function publishOne({dryRun=false}={}){
  if(!['posted','verified_posted'].includes(result.status))process.exitCode=2;
  return result;
 }
-if(process.argv[1]&&path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  publishOne({dryRun:process.argv.includes('--dry-run')})
   .catch(e=>{console.error(JSON.stringify({ok:false,error:e.message,postingPerformed:false}));process.exitCode=1;});
 }
