@@ -83,8 +83,18 @@ test('offline end-to-end: Rakuten item -> PR copy -> mock Threads POST -> durabl
     assert.deepEqual(rows.map(x=>x.meta.publishStatus),['pending','posted']);
     assert.equal(rows.at(-1).meta.itemCode,'demo:123');
   }finally{
-    if(agent && agent.exitCode===null)agent.kill();
+    // On Windows, kill() only signals termination. Chrome/profile handles can
+    // remain open until the child emits 'close', causing EPERM on temp cleanup.
+    if(agent && agent.exitCode===null && !agent.killed) {
+      const stopped = new Promise(resolve => {
+        agent.once('close', resolve);
+        agent.once('error', resolve);
+      });
+      agent.kill();
+      await Promise.race([stopped, delay(5000)]);
+    }
     await close(api);
-    fs.rmSync(directory,{recursive:true,force:true});
+    // Antivirus/Chrome can briefly hold files even after the Node child exits.
+    fs.rmSync(directory,{recursive:true,force:true,maxRetries:20,retryDelay:250});
   }
 });
