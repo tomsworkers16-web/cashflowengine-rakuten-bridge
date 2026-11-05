@@ -5,7 +5,7 @@ import {parseRakutenDailyCsv, mergeDailySnapshot,parseCsv} from '../src/rakuten-
 test('reads day-level Japanese Rakuten report with quoted currency and total line',()=>{
   const rows=parseRakutenDailyCsv('\uFEFF日付,クリック数,注文件数,成果報酬額\r\n2026/11/04,"1,200",2,"¥160"\r\n2026/11/05,0,0,0\r\n合計,1200,2,160\r\n');
   assert.equal(rows.length,2);
-  assert.deepEqual(rows[0],{jstDate:'2026-11-04',source:'rakuten_csv_period_daily',recordId:'period:2026-11-04',clicks:1200,orders:2,rewardYen:160});
+  assert.deepEqual(rows[0],{jstDate:'2026-11-04',source:'rakuten_csv_period_daily',recordId:'period:2026-11-04',rewardStatus:'provisional',clicks:1200,orders:2,rewardYen:160});
   assert.equal(rows[1].rewardYen,0);
 });
 
