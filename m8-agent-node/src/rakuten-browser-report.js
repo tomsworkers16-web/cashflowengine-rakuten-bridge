@@ -6,8 +6,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 import {parseRakutenDailyCsv} from './rakuten-csv.js';
-import {intakeRakutenDownloads} from './rakuten-download-intake.js';
-import {scanRakutenInbox} from './rakuten-report-importer.js';
+import {importRakutenReportFiles} from './rakuten-report-importer.js';
 import {inspectBrowserMemory,classifyChromeLaunchError} from './rakuten-browser-memory.js';
 
 const REPORT_URL='https://affiliate.rakuten.co.jp/report/';
@@ -117,6 +116,25 @@ async function clickUniqueNativeButton(page,label){
  await page.locator('button').nth(button.index).click({timeout:BROWSER_WAIT_MS});
  return {clicked:true,label};
 }
+// This exact CSV anchor was observed after clicking the Rakuten 日別
+// report's ダウンロード menu. Other menu links are never selected.
+export function exactCsvLinkIndices(links){
+ return links.map((link,i)=>(link.visible&&link.text==='CSV')?i:-1).filter(i=>i>=0);
+}
+async function csvMenuLinkCandidates(page){
+ return readWhenSettled(page,()=>page.locator('a').evaluateAll(links=>links.map((a,index)=>({
+  index,visible:Boolean(a.getClientRects().length),
+  text:(a.innerText||a.textContent||'').replace(/\s+/g,' ').trim(),
+  href:a.getAttribute('href')||''
+ }))));
+}
+export function isSafeRakutenExportLink(href){
+ if(!href||href==='#'||href.startsWith('#'))return true;
+ try{
+  const u=new URL(href,REPORT_URL);
+  return u.protocol==='https:'&&u.hostname==='affiliate.rakuten.co.jp';
+ }catch{return false;}
+}
 async function inspectPeriodFields(page){
  return readWhenSettled(page,()=>page.locator('select,input,[role="combobox"]').evaluateAll(elements=>
   elements.filter(e=>e.getClientRects().length>0).slice(0,35).map(e=>({
@@ -189,9 +207,8 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     controls,fields:await inspectPeriodFields(page),
     noDownload:true,noPosting:true,
     message:'期間別画面の操作部品を確認しました。CSVが1件だけ特定できたときのみ別コマンドで取得できます。'};
-  // Observed in the authenticated M8 UI: 期間別 -> 日別 -> ダウンロード.
-  // The last button may open a menu instead of downloading directly. Click it
-  // at most once. If no file appears, inspect the menu without further clicks.
+  // Confirmed live UI: 期間別 -> 日別 -> ダウンロード -> CSV (link).
+  // At most one click per control. No retries of download actions.
   const daily=await clickUniqueNativeButton(page,'日別');
   if(!daily.clicked)return {mode,status:'daily_tab_unverified',
     diagnostic:daily,noDownload:true,noPosting:true};
@@ -203,12 +220,26 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   if(matches.length!==1)return {mode,status:'download_control_unverified',
     count:matches.length,controls:await readControls(page),noDownload:true,noPosting:true};
   const selected=downloadButtons[matches[0]];
-  const downloadEvent=page.waitForEvent('download',{timeout:7000}).catch(()=>null);
   await page.locator('button').nth(selected.index).click({timeout:BROWSER_WAIT_MS});
-  const download=await downloadEvent;
-  if(!download)return {mode,status:'download_control_opened_no_file',
-   controls:await readControls(page),noDownload:true,noPosting:true,
-   message:'ダウンロードボタンを1回だけ押しました。ファイルが発生しなかったため、追加操作は行っていません。'};
+  // Menu links may be mounted after the click; inspect only until one CSV link
+  // appears, then click it exactly once.
+  let links=[],csv=[];
+  for(let attempt=0;attempt<8;attempt++){
+   links=await csvMenuLinkCandidates(page);
+   csv=exactCsvLinkIndices(links);
+   if(csv.length)break;
+   await page.waitForTimeout(250);
+  }
+  if(csv.length!==1)return {mode,status:'csv_menu_link_unverified',
+   matches:csv.length,controls:await readControls(page),noDownload:true,noPosting:true};
+  const link=links[csv[0]];
+  if(!isSafeRakutenExportLink(link.href))
+   return {mode,status:'untrusted_csv_export_destination',noDownload:true,noPosting:true};
+  const downloadPromise=page.waitForEvent('download',{timeout:DOWNLOAD_TIMEOUT_MS}).catch(()=>null);
+  await page.locator('a').nth(link.index).click({timeout:BROWSER_WAIT_MS});
+  const download=await downloadPromise;
+  if(!download)return {mode,status:'csv_export_no_file',noDownload:true,noPosting:true,
+   message:'CSVリンクを一度クリックしましたが、ファイルが届きませんでした。自動再試行しません。'};
   const suggested=download.suggestedFilename();
   assert(/\.csv$/i.test(suggested),'download_is_not_csv');
   const temp=path.resolve(dataDir,'rakuten-download-temp');
@@ -217,11 +248,14 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   try{
    await download.saveAs(saved);
    const result=captureValidatedCsv(downloadDir,fs.readFileSync(saved),{filename:suggested});
-   // Never import blindly into results when the watched folder is not configured.
-   const autoImport=process.env.RAKUTEN_REPORT_DOWNLOAD_DIR
-    ? {capture:intakeRakutenDownloads(dataDir,downloadDir),import:scanRakutenInbox(dataDir)}
-    : {status:'download_saved_import_not_configured'};
-   return {mode,status:'validated_csv_captured',...result,autoImport,noPosting:true};
+   // Explicit download was requested; import only this validated CSV now.
+   // Keep the original saved CSV for inspection/re-import if actual headers differ.
+   const imported=importRakutenReportFiles(dataDir,[path.join(downloadDir,result.filename)]);
+   if(imported.failures.length)
+    return {mode,status:'csv_saved_import_failed',...result,
+     importErrors:imported.failures.map(x=>x.error),noPosting:true};
+   return {mode,status:'validated_csv_captured_and_imported',...result,
+    imported:imported.imported,noPosting:true};
   }finally{fs.rmSync(saved,{force:true});}
  }finally{await context.close();}
 }
@@ -232,7 +266,7 @@ if(isMain){
  const interactive=process.argv.includes('--interactive');
  inspectOrCapture({mode,interactive})
   .then(result=>{console.log(JSON.stringify(result,null,2));
-    if(result.status!=='period_report_accessible'&&result.status!=='validated_csv_captured')
+    if(result.status!=='period_report_accessible'&&result.status!=='validated_csv_captured_and_imported')
       process.exitCode=2;})
   .catch(e=>{
    const reason=classifyChromeLaunchError(e);
