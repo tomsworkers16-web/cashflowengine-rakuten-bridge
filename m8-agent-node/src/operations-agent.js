@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { summarizePostJournal } from './report-posts.js';
+import { summarizeAffiliateDay } from './revenue-metrics.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -109,6 +110,7 @@ async function buildNightReport(day = dayKey()) {
   const state = readJson(stateFile, {});
   const postJournal = readJsonl(postsFile).filter(x => withinDay(x, day));
   const postSummary = summarizePostJournal(postJournal);
+  const affiliate = summarizeAffiliateDay(readJson(path.join(dataDir, 'affiliate-results.json'), null), day);
   const posts = postSummary.published;
   const replies = readJsonl(repliesFile).filter(x => withinDay(x, day));
   const events = readJsonl(eventsFile).filter(x => withinDay(x, day));
@@ -147,10 +149,11 @@ async function buildNightReport(day = dayKey()) {
       profileViews: accountInsights.metrics.views ?? 'unknown',
       linkClicks: accountInsights.metrics.clicks ?? 'unknown',
       followersCount: accountInsights.metrics.followers_count ?? 'unknown',
-      conversions: 'unknown',
-      reward: 'unknown',
-      profit: 'unknown'
+      conversions: affiliate.orders,
+      reward: affiliate.rewardYen,
+      profit: affiliate.profitYen
     },
+    affiliateResults: affiliate,
     decisions: {
       keepAutoPostEnabled: true,
       keepExternalReplyEnabled: true,
