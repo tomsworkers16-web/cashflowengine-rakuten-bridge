@@ -31,7 +31,7 @@ export function parseCsv(csv) {
 }
 function dateValue(x){
   const s=String(x||'').trim().normalize('NFKC');
-  const m=s.match(/^(\d{4})[\/-年](\d{1,2})[\/-月](\d{1,2})日?$/) || s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  const m=s.match(/^(\d{4})(?:[\/-]|年)(\d{1,2})(?:[\/-]|月)(\d{1,2})日?$/) || s.match(/^(\d{4})(\d{2})(\d{2})$/);
   if(!m)return null;
   const year=+m[1],month=+m[2],day=+m[3];
   const valid=new Date(Date.UTC(year,month-1,day));
