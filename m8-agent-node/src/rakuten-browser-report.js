@@ -40,6 +40,31 @@ async function readControls(page){
   }))
  ).then(sanitizeControls);
 }
+// Only use the uniquely identified period-by-day report tab. Never select
+// order-detail or confirmed-reward tabs by guessing at similar labels.
+export function isPeriodTabLabel(text) {
+ return String(text || '').trim() === '期間別';
+}
+async function selectPeriodReport(page){
+ const tab=page.getByRole('button',{name:'期間別',exact:true});
+ if(await tab.count()!==1)return {selected:false,status:'period_tab_not_unique'};
+ await tab.click({timeout:BROWSER_WAIT_MS});
+ await page.waitForTimeout(1800);
+ if(classifyRakutenReportPage(page.url())!=='report')
+  return {selected:false,status:'report_navigation_changed'};
+ return {selected:true,status:'period_tab_selected'};
+}
+async function inspectPeriodFields(page){
+ return page.locator('select,input,[role="combobox"]').evaluateAll(elements=>
+  elements.filter(e=>e.getClientRects().length>0).slice(0,35).map(e=>({
+   tag:e.tagName.toLowerCase(),type:(e.getAttribute('type')||'').slice(0,20),
+   label:(e.getAttribute('aria-label')||e.labels?.[0]?.innerText||e.getAttribute('placeholder')||'')
+    .replace(/\s+/g,' ').trim().slice(0,65),
+   options:e.tagName.toLowerCase()==='select'
+    ?Array.from(e.options).slice(0,12).map(o=>o.textContent.trim().slice(0,35)):undefined
+  }))
+ );
+}
 function assertCsv(bytes){
  assert(bytes.length>0&&bytes.length<=5*1024*1024,'invalid_csv_size');
  let text;
@@ -87,11 +112,16 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   if(classification!=='report')
    return {mode,status:'login_or_unexpected_page',pageType:classification,
     noDownload:true,noPosting:true};
+  const tabResult=await selectPeriodReport(page);
+  if(!tabResult.selected)
+   return {mode,status:tabResult.status,pageType:'report',controls:await readControls(page),
+    noDownload:true,noPosting:true};
   const controls=await readControls(page);
   if(mode==='inspect')
-   return {mode,status:'report_page_accessible',pageType:'report',controls,
+   return {mode,status:'period_report_accessible',pageType:'report',tab:'期間別',
+    controls,fields:await inspectPeriodFields(page),
     noDownload:true,noPosting:true,
-    message:'画面に合ったCSVボタンを特定できた段階で--downloadを有効にします。'};
+    message:'期間別画面の操作部品を確認しました。CSVが1件だけ特定できたときのみ別コマンドで取得できます。'};
   // Very restrictive automatic capture: visible single CSV-labeled button/link only.
   // If ambiguous or absent, do not click unknown links or icons.
   const candidates=page.getByRole('button',{name:/CSV|ダウンロード/i});
@@ -132,7 +162,7 @@ if(isMain){
  const interactive=process.argv.includes('--interactive');
  inspectOrCapture({mode,interactive})
   .then(result=>{console.log(JSON.stringify(result,null,2));
-    if(result.status!=='report_page_accessible'&&result.status!=='validated_csv_captured')
+    if(result.status!=='period_report_accessible'&&result.status!=='validated_csv_captured')
       process.exitCode=2;})
   .catch(e=>{console.error(JSON.stringify({status:'capture_failed',error:e.message,noPosting:true}));process.exitCode=1;});
 }
