@@ -84,3 +84,13 @@ test('actual Rakuten columns preserve sales and reward as distinct metrics',()=>
  assert.equal(row.clicks,3);
  assert.equal(Object.hasOwn(row,'orders'),false);
 });
+
+test('verified preamble with stray quote is stripped, with strict five column data validation',()=>{
+ const quotedTitle='期間別レポート 日別 "';
+ const csv=quotedTitle+'\n\n発生日,成果報酬,クリック数,売上件数,売上金額\n2026/11/05,30,5,1,1500\n';
+ const rows=parseRakutenDailyCsv(csv);
+ assert.equal(rows.length,1);
+ assert.equal(rows[0].rewardYen,30);
+ assert.equal(rows[0].salesAmountYen,1500);
+ assert.throws(()=>parseRakutenDailyCsv(quotedTitle+'\n\n発生日,成果報酬,クリック数,売上件数,売上金額\n2026/11/05,3"0,5,1,1500\n'),/invalid_csv_quotes/);
+});
