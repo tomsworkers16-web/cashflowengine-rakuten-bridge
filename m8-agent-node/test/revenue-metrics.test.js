@@ -55,3 +55,16 @@ test('unspecified evidence status is not presumed confirmed',()=>{
   assert.equal(v.rewardStatus,'unknown');
   assert.equal(v.profitYen,'unknown');
 });
+
+test('sales counts are distinct from order counts and are not equated to conversions',()=>{
+ const v=summarizeAffiliateDay({records:[{
+  jstDate:day,source:'rakuten_csv_period_daily',rewardStatus:'provisional',
+  clicks:3,rewardYen:80,salesCount:1,salesAmountYen:1400
+ }]},day);
+ assert.equal(v.salesCount,1);
+ assert.equal(v.salesAmountYen,1400);
+ assert.equal(v.rewardYen,80);
+ assert.equal(v.orders,'unknown');
+ assert.equal(v.conversionRate,'unknown');
+ assert.equal(v.profitYen,'unknown');
+});
