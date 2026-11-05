@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
-import { publishTextOnce, findRecoverablePosts } from './posting-guard.js';
+import { publishTextOnce, findRecoverablePosts, postedNearAttempt } from './posting-guard.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -241,12 +241,17 @@ async function postFor(slot, { catchup = false } = {}) {
   }
   if (IMAGE_POST_ENABLED && imageCard && imageBrowserContext) {
     try {
+      // Write an intent *before* any browser interaction, so process crashes never
+      // cause blind resubmission of a possibly published image.
+      const imageAttemptAt = new Date().toISOString();
+      append(postsFile, {at:imageAttemptAt, jstDate:dayKey(), slot, id:null, text,
+        meta:{...meta,publishStatus:'pending',imageTemplate:imageCard.template}});
       const result = await publishImageBrowser(imageBrowserContext, imageCard.path, text);
       state.lastImagePostResult = result.status;
       // The browser's submit click is NOT a durable success guarantee.
       // Check the official API; never blindly publish the same text through the API.
       await sleep(5000);
-      const verified = (await threadsToday()).find(p => String(p.text || '').trim() === text.trim());
+      const verified = (await threadsToday()).find(p => String(p.text || '').trim() === text.trim() && postedNearAttempt(p, imageAttemptAt));
       if (verified?.id) {
         id = verified.id;
         state.lastImagePostResult = 'verified_posted';
