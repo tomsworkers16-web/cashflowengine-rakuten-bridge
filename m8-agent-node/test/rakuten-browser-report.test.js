@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -21,4 +21,12 @@ test('CSV export is validated and source file name is never used as a path',()=>
   assert.throws(()=>captureValidatedCsv(dir,Buffer.from('email,pass\nx,y\n')),/date_column_missing/);
   assert.equal(fs.readdirSync(dir).length,1);
  }finally{fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
+});
+
+test('period report tab identification is exact and excludes other report types',()=>{
+ assert.equal(isPeriodTabLabel('期間別'),true);
+ assert.equal(isPeriodTabLabel(' 期間別 '),true);
+ assert.equal(isPeriodTabLabel('注文明細'),false);
+ assert.equal(isPeriodTabLabel('成果報酬・確定実績'),false);
+ assert.equal(isPeriodTabLabel('期間別CSVダウンロード'),false);
 });
