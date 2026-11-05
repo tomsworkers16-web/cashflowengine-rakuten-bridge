@@ -4,6 +4,7 @@ import { summarizePostJournal } from './report-posts.js';
 import { summarizeAffiliateDay } from './revenue-metrics.js';
 import { scanRakutenInbox } from './rakuten-report-importer.js';
 import { operationalAdvice } from './ops-policy.js';
+import { decideRevenueActions } from './nightly-schedule.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -174,6 +175,8 @@ async function buildNightReport(day = dayKey()) {
         : 'Threads insights unavailable; do not infer missing click or conversion data as zero.'
     }
   };
+
+  report.revenueDecisions = decideRevenueActions(report);
 
   writeJson(path.join(reportsDir, `${day}-night.json`), report);
   writeJson(path.join(dataDir, 'latest-night-evaluation.json'), report);
