@@ -3,6 +3,7 @@ import path from 'node:path';
 import { summarizePostJournal } from './report-posts.js';
 import { summarizeAffiliateDay } from './revenue-metrics.js';
 import { scanRakutenInbox } from './rakuten-report-importer.js';
+import { intakeRakutenDownloads } from './rakuten-download-intake.js';
 import { operationalAdvice } from './ops-policy.js';
 import { decideRevenueActions } from './nightly-schedule.js';
 
@@ -113,6 +114,7 @@ async function buildNightReport(day = dayKey()) {
   const state = readJson(stateFile, {});
   const postJournal = readJsonl(postsFile).filter(x => withinDay(x, day));
   const postSummary = summarizePostJournal(postJournal);
+  const affiliateCapture = intakeRakutenDownloads(dataDir,process.env.RAKUTEN_REPORT_DOWNLOAD_DIR);
   const affiliateImport = scanRakutenInbox(dataDir);
   const affiliate = summarizeAffiliateDay(readJson(path.join(dataDir, 'affiliate-results.json'), null), day);
   const posts = postSummary.published;
@@ -166,6 +168,7 @@ async function buildNightReport(day = dayKey()) {
       profit: affiliate.profitYen
     },
     affiliateResults: affiliate,
+    affiliateCapture,
     affiliateImport,
     decisions: {
       ...operationalAdvice({
