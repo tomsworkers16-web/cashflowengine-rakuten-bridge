@@ -4,7 +4,7 @@ import http from 'node:http';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
-import { roleForSlot, editorialText, revenueText } from './product-posting.js';
+import { roleForSlot, editorialText, revenueText, validatePublicationText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
 import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
 
@@ -220,6 +220,17 @@ async function postFor(slot, { catchup = false } = {}) {
     if (todayLocalPosts().some(p => p.text === text)) {
       state.lastDecision = 'fallback_already_posted'; return;
     }
+  }
+  // Validate before browser image submit or text POST, including editorial fallback.
+  const copyError = validatePublicationText(text, {
+    revenue: role === 'revenue',
+    affiliateUrl: chosenItem?.affiliateUrl || null
+  });
+  if (copyError) {
+    state.lastDecision = 'unsafe_copy_skipped';
+    event('POST_SKIPPED', { slot, reason: copyError });
+    saveState();
+    return;
   }
   if (official.some(p => String(p.text || '').trim() === text.trim())) {
     state.lastDecision = 'duplicate_official_text'; return;
