@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
-import {parseRakutenDailyCsv} from './rakuten-csv.js';
+import {parseRakutenDailyCsv,parseCsv} from './rakuten-csv.js';
 import {importRakutenReportFiles} from './rakuten-report-importer.js';
 import {inspectBrowserMemory,classifyChromeLaunchError} from './rakuten-browser-memory.js';
 
@@ -156,6 +156,35 @@ function assertCsv(bytes){
  assert(rows.length>0,'no_daily_rows');
  return {days:rows.length};
 }
+// Inspect column structure only. Never print CSV data rows, amounts or account identifiers.
+export function summarizeRakutenCsvSchema(bytes){
+ const summary={sizeBytes:bytes.length,encoding:'unknown',firstRowColumns:0,
+  firstRowLabels:[],possibleHeaderRow:null,delimiter:'unknown'};
+ try{
+  let decoded;
+  try{decoded=new TextDecoder('utf-8',{fatal:true}).decode(bytes);summary.encoding='utf-8';}
+  catch{decoded=new TextDecoder('shift_jis',{fatal:true}).decode(bytes);summary.encoding='shift_jis';}
+  const lines=decoded.replace(/^\uFEFF/,'').split(/\r\n|\r|\n/).filter(x=>x.trim()).slice(0,8);
+  const delimiters=[',','\t',';'];
+  const counts=delimiters.map(d=>({symbol:d,count:(lines[0]||'').split(d).length}));
+  counts.sort((a,b)=>b.count-a.count);
+  summary.delimiter=counts[0].count>1?(counts[0].symbol==='\t'?'tab':counts[0].symbol===';'?'semicolon':'comma'):'unknown';
+  const rows=summary.delimiter==='comma'?parseCsv(decoded).slice(0,8):lines.map(x=>x.split(counts[0].symbol));
+  summary.firstRowColumns=rows[0]?.length||0;
+  // Expose only generic structural field descriptions. Never emit the
+  // CSV's actual text (even headers may accidentally contain user data).
+  const hints=['日付','年月日','クリック','注文','成果','報酬','date','click','order','reward','売上','金額','期間','発生'];
+  const candidate=rows.findIndex(row=>row.filter(cell=>hints.some(h=>String(cell).toLowerCase().includes(h.toLowerCase()))).length>=2);
+  if(candidate>=0){
+   summary.possibleHeaderRow=candidate+1;
+   summary.firstRowLabels=rows[candidate].slice(0,25).map(cell=>{
+    const h=hints.find(x=>String(cell).toLowerCase().includes(x.toLowerCase()));
+    return h||'other';
+   });
+  }
+ }catch{summary.schemaInspection='unavailable';}
+ return summary;
+}
 export function captureValidatedCsv(downloadDir,bytes,{filename='rakuten-report.csv'}={}){
  const evidence=assertCsv(bytes);
  fs.mkdirSync(downloadDir,{recursive:true});
@@ -277,7 +306,23 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
    stage='save_download_file';
    await download.saveAs(saved);
    stage='validate_downloaded_csv';
-   const result=captureValidatedCsv(downloadDir,fs.readFileSync(saved),{filename:suggested});
+   const bytes=fs.readFileSync(saved);
+   let result;
+   try{result=captureValidatedCsv(downloadDir,bytes,{filename:suggested});}
+   catch(error){
+    // Keep only the raw report locally so we can fix the importer without
+    // initiating additional authenticated downloads or posting sensitive data.
+    const quarantine=path.resolve(dataDir,'rakuten-report-rejected');
+    fs.mkdirSync(quarantine,{recursive:true});
+    const rejected='rejected-'+Date.now()+'-'+process.pid+'.csv';
+    fs.writeFileSync(path.join(quarantine,rejected),bytes,{flag:'wx',mode:0o600});
+    return {mode,status:'downloaded_csv_needs_mapping',
+     diagnostic:diagnoseRakutenCaptureFailure(error,stage),
+     schema:summarizeRakutenCsvSchema(bytes),
+     localRejectedFile:rejected,
+     message:'CSVは取得済みで、データは集計していません。列構造の確認が必要です。',
+     noPosting:true,noImport:true};
+   }
    // Explicit download was requested; import only this validated CSV now.
    // Keep the original saved CSV for inspection/re-import if actual headers differ.
    stage='import_validated_csv';

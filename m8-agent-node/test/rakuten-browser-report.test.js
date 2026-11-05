@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -87,4 +87,18 @@ test('safe report diagnostics identify stage and errors without leaking private 
  assert.equal(diagnoseRakutenCaptureFailure(new Error('locator.click: Timeout 18000ms exceeded'),'click_csv_link').code,'timeout');
  assert.equal(diagnoseRakutenCaptureFailure(new Error('Unrecognized unknown problem'),'save_download_file').code,'unclassified');
  assert.equal(diagnoseRakutenCaptureFailure(new Error('EACCES: permission denied'),'save_download_file').code,'local_file_access');
+});
+
+test('rejected CSV schema reveals only structural hints, not rows or earnings',()=>{
+ const csv='日別,クリック合計,注文件数,成果報酬\n2026/11/05,12345,2,500\n';
+ const summary=summarizeRakutenCsvSchema(Buffer.from(csv,'utf8'));
+ assert.equal(summary.encoding,'utf-8');
+ assert.equal(summary.firstRowColumns,4);
+ assert.equal(summary.possibleHeaderRow,1);
+ assert.equal(summary.firstRowLabels.length,4);
+ assert.equal(JSON.stringify(summary).includes('12345'),false);
+ assert.equal(JSON.stringify(summary).includes('2026/11/05'),false);
+ const tab=summarizeRakutenCsvSchema(Buffer.from('日付\tクリック数\t成果報酬\n2026/11/05\t2\t50'));
+ assert.equal(tab.delimiter,'tab');
+ assert.equal(tab.firstRowColumns,3);
 });
