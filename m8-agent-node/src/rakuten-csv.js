@@ -1,7 +1,7 @@
 // Strict, offline importer for Rakuten *period-by-day* reports, not order-detail exports.
 // Rakuten CSV headings may change. Unknown/missing metrics remain unknown.
 const HEADERS = {
-  day: ['日付','年月日','成果発生日','date','day'],
+  day: ['日付','年月日','成果発生日','発生日','date','day'],
   clicks: ['クリック数','クリック','clicks'],
   orders: ['注文件数','注文数','成果件数','発生成果件数','orders'],
   rewardYen: ['成果報酬','成果報酬額','発生成果報酬','報酬額','報酬','rewardYen'],
@@ -49,7 +49,22 @@ export function parseRakutenDailyCsv(csv) {
   if(typeof csv!=='string'||!csv.trim()||csv.length>5*1024*1024)throw Error('invalid_csv_size');
   const rows=parseCsv(csv);
   if(rows.length<2)throw Error('no_data_rows');
-  const header=rows[0].map(norm);
+  // Rakuten may prepend a one-cell title (e.g. report name) above the
+  // five-column daily data header. Only skip a *single* title row if the
+  // next row has an unambiguous date column and at least one supported metric.
+  // Never guess at sales amounts or infer monetary meaning from column order.
+  let headerRow=0;
+  const canBeDailyHeader=(cells)=>{
+   const names=cells.map(norm);
+   const keys=Object.entries(HEADERS).map(([key,aliases])=>({
+    key,matches:names.filter(h=>aliases.map(norm).includes(h)).length
+   }));
+   return keys.find(x=>x.key==='day')?.matches===1 &&
+    keys.filter(x=>x.key!=='day').some(x=>x.matches===1);
+  };
+  if(rows[0].length===1&&rows.length>=3&&canBeDailyHeader(rows[1]))
+   headerRow=1;
+  const header=rows[headerRow].map(norm);
   const idx={};
   for(const [key,aliases]of Object.entries(HEADERS)){
     const matches=header.map((h,i)=>aliases.map(norm).includes(h)?i:-1).filter(i=>i>=0);
@@ -59,7 +74,7 @@ export function parseRakutenDailyCsv(csv) {
   if(idx.day<0)throw Error('date_column_missing');
   if(['clicks','orders','rewardYen'].every(key=>idx[key]<0))throw Error('no_supported_metrics');
   const byDay=new Map();
-  for(let i=1;i<rows.length;i++){
+  for(let i=headerRow+1;i<rows.length;i++){
     const cells=rows[i];
     if(cells.length!==header.length)throw Error('csv_column_count_mismatch_row_'+(i+1));
     const rawDate=cells[idx.day];
