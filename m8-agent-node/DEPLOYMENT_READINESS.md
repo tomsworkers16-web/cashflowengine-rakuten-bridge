@@ -20,3 +20,17 @@ npm.cmd run verify
 - First revenue requires an actually attributed affiliate order and reported reward, not just a Threads post or a preview image.
 
 Unresolved: automated import of actual affiliate reward evidence, tested image publishing with verified rights, M8 deploy/restart, and production operation.
+
+## One-command verification on M8 (does not publish)
+
+When the M8 machine becomes accessible, run in PowerShell from
+`C:\\AI-Factory\\cashflowengine-rakuten-bridge\\m8-agent-node`:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Update-And-Check.ps1
+```
+
+The script stops on uncommitted tracked edits, wrong branch, missing local `.env`,
+failed fast-forward, failed tests, or failed API verification. It deliberately does
+not restart the M8 core, edit secrets, publish Threads posts, or enable auto-post.
+After checks, inspect existing service processes before a separate controlled restart.
