@@ -8,6 +8,7 @@ import {chromium} from 'playwright-core';
 import {parseRakutenDailyCsv} from './rakuten-csv.js';
 import {intakeRakutenDownloads} from './rakuten-download-intake.js';
 import {scanRakutenInbox} from './rakuten-report-importer.js';
+import {inspectBrowserMemory,classifyChromeLaunchError} from './rakuten-browser-memory.js';
 
 const REPORT_URL='https://affiliate.rakuten.co.jp/report/';
 const DOWNLOAD_TIMEOUT_MS=20000;
@@ -137,6 +138,10 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   downloadDir=process.env.RAKUTEN_REPORT_DOWNLOAD_DIR||path.resolve(process.cwd(),'.data/rakuten-browser-exports'),
   interactive=false}={}){
  assert(mode==='inspect'||mode==='download','unknown_mode');
+ const memory=inspectBrowserMemory();
+ if(!memory.allowed)return {mode,status:'browser_preflight_blocked',
+  memory,noDownload:true,noPosting:true,
+  message:'楽天レポート用Chromeを起動しません。Windowsの仮想メモリ設定を確認してください。'};
  const chrome=executable();assert(chrome,'chrome_not_found');
  const profile=path.resolve(dataDir,'rakuten-report-chrome-profile');
  const context=await chromium.launchPersistentContext(profile,{
@@ -212,5 +217,13 @@ if(isMain){
   .then(result=>{console.log(JSON.stringify(result,null,2));
     if(result.status!=='period_report_accessible'&&result.status!=='validated_csv_captured')
       process.exitCode=2;})
-  .catch(e=>{console.error(JSON.stringify({status:'capture_failed',error:e.message,noPosting:true}));process.exitCode=1;});
+  .catch(e=>{
+   const reason=classifyChromeLaunchError(e);
+   // Chrome error logs can include local profile paths and verbose launch flags.
+   console.error(JSON.stringify({status:'capture_failed',reason,
+    message:reason==='chrome_virtual_memory_exhausted'
+     ? 'Windowsの仮想メモリ不足でChromeが終了しました。ページファイル設定を確認してください。'
+     : '楽天レポートブラウザ処理に失敗しました。',noPosting:true,noDownload:true}));
+   process.exitCode=1;
+  });
 }
