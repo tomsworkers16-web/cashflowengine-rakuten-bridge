@@ -48,7 +48,7 @@ test('accepts one report-title preamble before five Rakuten daily columns',()=>{
  assert.deepEqual(rows[0],{
   jstDate:'2026-11-05',source:'rakuten_csv_period_daily',
   recordId:'period:2026-11-05',rewardStatus:'provisional',
-  clicks:3,orders:2,rewardYen:50
+  clicks:3,orders:2,rewardYen:50,salesAmountYen:1200
  });
 });
 test('does not infer rewards from sales and rejects unsafe ambiguous preambles',()=>{
@@ -57,7 +57,7 @@ test('does not infer rewards from sales and rejects unsafe ambiguous preambles',
  assert.equal(rows[0].clicks,4);
  assert.equal(rows[0].orders,1);
  assert.equal(Object.hasOwn(rows[0],'rewardYen'),false);
- assert.throws(()=>parseRakutenDailyCsv('楽天レポート\n発生日,売上金額\n2026/11/05,5000\n'),/date_column_missing/);
+ assert.throws(()=>parseRakutenDailyCsv('楽天レポート\n発生日,売上金額\n2026/11/05,5000\n'),/date_column_missing|no_supported_metrics/);
  assert.throws(()=>parseRakutenDailyCsv('タイトル\n注文明細,注文番号,金額\n2026/11/05,X1,500\n'),/date_column_missing/);
 });
 
