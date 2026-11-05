@@ -3,6 +3,7 @@ import path from 'node:path';
 import { summarizePostJournal } from './report-posts.js';
 import { summarizeAffiliateDay } from './revenue-metrics.js';
 import { scanRakutenInbox } from './rakuten-report-importer.js';
+import { operationalAdvice } from './ops-policy.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -161,12 +162,16 @@ async function buildNightReport(day = dayKey()) {
     affiliateResults: affiliate,
     affiliateImport,
     decisions: {
-      keepAutoPostEnabled: true,
-      keepExternalReplyEnabled: true,
-      increaseReplyVolume: false,
-      reason: accountInsights.available
-        ? 'Threads profile/click insights are available; keep conservative volume until multiple days are collected.'
-        : 'Threads insights unavailable or permission missing; keep unknown values unknown and continue conservative experimentation.'
+      ...operationalAdvice({
+        autoPosting: String(process.env.CFE_AUTO_POST_ENABLED || 'false').toLowerCase() === 'true',
+        externalReply: String(process.env.CFE_EXTERNAL_REPLY_ENABLED || 'false').toLowerCase() === 'true',
+        status
+      }),
+      revenueDataReadiness: affiliate.dataStatus,
+      rewardStatus: affiliate.rewardStatus,
+      evidenceNote: accountInsights.available
+        ? 'Threads insights do not prove Rakuten affiliate conversions.'
+        : 'Threads insights unavailable; do not infer missing click or conversion data as zero.'
     }
   };
 
