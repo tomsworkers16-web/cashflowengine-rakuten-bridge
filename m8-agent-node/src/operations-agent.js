@@ -146,8 +146,10 @@ async function buildNightReport(day = dayKey()) {
       posts: postInsights
     },
     funnel: {
-      profileViews: accountInsights.metrics.views ?? 'unknown',
-      linkClicks: accountInsights.metrics.clicks ?? 'unknown',
+      // Views are exposure, not profile visits. Do not mislabel them as profile views.
+      threadsViews: accountInsights.metrics.views ?? 'unknown',
+      profileViews: 'unknown',
+      threadsLinkClicks: accountInsights.metrics.clicks ?? 'unknown',
       followersCount: accountInsights.metrics.followers_count ?? 'unknown',
       conversions: affiliate.orders,
       reward: affiliate.rewardYen,
@@ -206,8 +208,9 @@ async function runDailyCommander() {
   const candidateCount = Number(latest?.actuals?.latestCandidateCount || current.lastCandidateCount || 0);
   const eligibleCount = Number(latest?.actuals?.latestEligibleCount || current.lastEligibleReplyCount || 0);
   const insightReports = history.filter(r => r?.threadsInsights?.account?.available);
-  const clicks = insightReports.reduce((n, r) => n + (Number.isFinite(r?.funnel?.linkClicks) ? r.funnel.linkClicks : 0), 0);
-  const profileViews = insightReports.reduce((n, r) => n + (Number.isFinite(r?.funnel?.profileViews) ? r.funnel.profileViews : 0), 0);
+  // Threads link clicks and impression views are NOT Rakuten affiliate link clicks or profile visits.
+  const clicks = insightReports.reduce((n, r) => n + (Number.isFinite(r?.funnel?.threadsLinkClicks) ? r.funnel.threadsLinkClicks : 0), 0);
+  const views = insightReports.reduce((n, r) => n + (Number.isFinite(r?.funnel?.threadsViews) ? r.funnel.threadsViews : 0), 0);
 
   if (recentFailures > 0 || current.browserOk === false) {
     maxReplies = 2;
@@ -221,10 +224,10 @@ async function runDailyCommander() {
     maxReplies = 4;
     minScore = 45;
     reasons.push('Three-day Threads insights show link clicks with healthy candidate supply: allow a controlled increase to 4 replies/day.');
-  } else if (insightReports.length >= 3 && profileViews > 0 && clicks === 0) {
+  } else if (insightReports.length >= 3 && views > 0 && clicks === 0) {
     maxReplies = 3;
     minScore = 50;
-    reasons.push('Profile views exist but link clicks are zero: improve traffic quality before increasing reply volume.');
+    reasons.push('Threads views exist but reported Threads link clicks are zero: improve traffic quality before increasing reply volume.');
   } else if (candidateCount >= 20 && eligibleCount >= 3) {
     reasons.push('Candidate supply is healthy: keep 3/day until downstream signal is mature.');
   } else {
@@ -245,8 +248,8 @@ async function runDailyCommander() {
     },
     observed: {
       reportsWithThreadsInsights: insightReports.length,
-      threeDayProfileViews: insightReports.length ? profileViews : 'unknown',
-      threeDayLinkClicks: insightReports.length ? clicks : 'unknown'
+      threeDayThreadsViews: insightReports.length ? views : 'unknown',
+      threeDayThreadsLinkClicks: insightReports.length ? clicks : 'unknown'
     },
     constraints: {
       unknownMetricsAreNotZero: true,
