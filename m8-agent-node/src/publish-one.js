@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {URL,fileURLToPath} from 'node:url';
-import { revenueText } from './product-posting.js';
+import { revenueText,validatePublicationText } from './product-posting.js';
 import { publishTextOnce } from './posting-guard.js';
 
 const env=process.env;
@@ -82,10 +82,8 @@ async function chooseItem(journal){
  throw Error('no_eligible_affiliate_item_in_rakuten_results');
 }
 function validateText(text,affiliateUrl){
- assert(text&&text.startsWith('【PR・アフィリエイト】'),'pr_disclosure_missing');
- assert(text.includes(affiliateUrl),'affiliate_url_not_complete');
- assert(text.length<=500,'threads_text_too_long');
- assert(!/\uFFFD|(?:繧|縺|萓ｿ蛻ｩ|謗・勁)/u.test(text),'suspicious_mojibake_in_copy');
+ const error=validatePublicationText(text,{revenue:true,affiliateUrl});
+ assert(!error,error||'invalid_publication_copy');
 }
 export async function publishOne({dryRun=false}={}){
  assert(env.THREADS_ACCESS_TOKEN&&env.RAKUTEN_APPLICATION_ID&&env.RAKUTEN_ACCESS_KEY&&env.RAKUTEN_AFFILIATE_ID,'credentials_missing');

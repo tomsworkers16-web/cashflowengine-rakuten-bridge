@@ -1,8 +1,25 @@
-// Product-first editorial copy for Cash Flow Engine #001.
-// Uses only fields returned by the official Rakuten API; never implies ownership or usage.
-export function cleanProductName(value = '') {
-  return String(value).replace(/[\r\n\t]/g, ' ').replace(/【[^】]{0,36}】/g, ' ')
-    .replace(/\[[^\]]{0,36}\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 65);
+// Product-first editorial copy. Uses only official API product data.
+export function cleanProductName(value = '', limit = 44) {
+  const raw = String(value).replace(/[\r\n\t]/g,' ')
+    .replace(/【[^】]{0,36}】/g,' ').replace(/\[[^\]]{0,36}\]/g,' ')
+    .replace(/\s+/g,' ').trim();
+  if (raw.length <= limit) return raw;
+  const prefix = raw.slice(0,limit);
+  // Keep a complete product keyword, not the chopped-off "フィルタ" from initial posts.
+  const lastSpace = prefix.lastIndexOf(' ');
+  return lastSpace >= Math.max(8, Math.floor(limit*0.55)) ? prefix.slice(0,lastSpace) : prefix;
+}
+
+export function validatePublicationText(text, {affiliateUrl=null, revenue=false}={}) {
+  if (typeof text!=='string'||!text.trim()||text.length>500) return 'invalid_post_length';
+  if (/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]|(?:繧[ｦｭｸｹ]|縺[ｾｪｮｨ]|萓ｿ蛻ｩ)/u.test(text))
+    return 'suspicious_mojibake_or_control_char';
+  if (revenue) {
+    if (!text.startsWith('【PR・アフィリエイト】')) return 'pr_disclosure_missing';
+    if (typeof affiliateUrl!=='string'||!/^https:\/\//.test(affiliateUrl)||!text.endsWith(affiliateUrl))
+      return 'affiliate_url_missing_or_modified';
+  }
+  return null;
 }
 
 export function roleForSlot(slot, slots, dayNumber = 1) {
@@ -12,7 +29,6 @@ export function roleForSlot(slot, slots, dayNumber = 1) {
   if (slots.length === 2) return index === 0 ? 'discovery' : 'revenue';
   if (index === 0) return 'discovery';
   if (index === 1) return 'revenue';
-  // Alternating comparison and a second discovery gives ~50% discovery over six slots.
   if (index === 2) return dayNumber % 2 === 0 ? 'comparison' : 'discovery';
   return index % 3 === 1 ? 'revenue' : 'discovery';
 }
@@ -43,12 +59,22 @@ export function editorialText(item, mode = 'discovery') {
 }
 
 export function revenueText(item) {
+  const url = String(item?.affiliateUrl || '');
   const name = cleanProductName(item?.itemName);
-  if (!name || !/^https:\/\//.test(String(item?.affiliateUrl || ''))) return null;
-  const price = Number(item.price) > 0 ? `掲載時の価格は約${Number(item.price).toLocaleString('ja-JP')}円（変動あり）。` : '';
-  const url = item.affiliateUrl;
-  const head = [ '【PR・アフィリエイト】', '今日気になった便利グッズはこちら👇', `「${name}」`, price,
-    '購入前に商品ページでサイズ・仕様・レビューを確認してね。', '商品詳細はこちら' ].filter(Boolean).join('\n');
-  if (url.length > 470) return null; // Do not publish truncated affiliate links.
-  return `${head.slice(0, 499 - url.length - 1)}\n${url}`;
+  if (!name || !/^https:\/\//.test(url) || url.length>470) return null;
+  const price = Number(item.price)>0
+    ? `掲載時の価格：約${Number(item.price).toLocaleString('ja-JP')}円（変動あり）` : '';
+  // Never trim away required disclosure, sentence endings, or the affiliate URL.
+  const variants = [
+    ['【PR・アフィリエイト】', '今日の便利グッズ', `「${name}」`, price,
+      '購入前にサイズ・仕様を確認してね。', url],
+    ['【PR・アフィリエイト】', `「${cleanProductName(item.itemName,25)}」`, price,
+      '商品詳細はこちら',url],
+    ['【PR・アフィリエイト】',`「${cleanProductName(item.itemName,16)}」`,url]
+  ];
+  for(const parts of variants){
+    const text=parts.filter(Boolean).join('\n');
+    if(!validatePublicationText(text,{revenue:true,affiliateUrl:url}))return text;
+  }
+  return null;
 }

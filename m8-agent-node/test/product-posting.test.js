@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanProductName, editorialText, revenueText, roleForSlot } from '../src/product-posting.js';
+import { cleanProductName, editorialText, revenueText, roleForSlot, validatePublicationText } from '../src/product-posting.js';
 
 test('affiliate posts include a clear disclosure and the full original link', () => {
   const url = 'https://affiliate.example.jp/product?item=shop%3A10002149&affiliateId=abc';
@@ -29,4 +29,34 @@ test('editorial copy does not invent first-hand ownership or link to affiliate c
 test('slot assignment reserves a revenue slot on multi-post days', () => {
   assert.equal(roleForSlot('07:30',['07:30','12:30','19:30'],5),'discovery');
   assert.equal(roleForSlot('12:30',['07:30','12:30','19:30'],5),'revenue');
+});
+
+test('long real Rakuten listing does not split product name mid-keyword', () => {
+  const name='【オトクなクーポン配布中】 スターフィルター 換気扇フィルター レンジフードフィルター レンジフィルターカバー スターターセット 強力マグネット+交換フィルター3枚';
+  const clean=cleanProductName(name);
+  assert.ok(clean.length <= 44);
+  assert.equal(clean.includes('フィルタ」'),false);
+  assert.ok(clean.includes('スターフィルター'));
+  const url='https://hb.afl.rakuten.co.jp/hgc/test/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdemo%2F123%2F';
+  const body=revenueText({itemName:name,price:3080,affiliateUrl:url});
+  assert.ok(body?.endsWith(url));
+  assert.equal(validatePublicationText(body,{affiliateUrl:url,revenue:true}),null);
+});
+
+test('a long but valid link is never truncated or silently stripped', () => {
+  const url='https://hb.afl.rakuten.co.jp/hgc/test/?pc='+ 'x'.repeat(375);
+  const body=revenueText({itemName:'収納用フック',price:1600,affiliateUrl:url});
+  assert.ok(body && body.length<=500);
+  assert.ok(body.endsWith(url));
+  assert.equal(validatePublicationText(body,{affiliateUrl:url,revenue:true}),null);
+});
+
+test('guard rejects corrupted Japanese and missing PR disclosure without a network call', () => {
+  assert.match(validatePublicationText('縺ｮ蛻ｩ繧ｰ繝・ぜ'),/mojibake/);
+  assert.equal(validatePublicationText('商品はおすすめです\nhttps://affiliate.invalid',{
+    revenue:true,affiliateUrl:'https://affiliate.invalid'
+  }),'pr_disclosure_missing');
+  assert.equal(validatePublicationText('【PR・アフィリエイト】\nhttps://a.invalid',{
+    revenue:true,affiliateUrl:'https://b.invalid'
+  }),'affiliate_url_missing_or_modified');
 });
