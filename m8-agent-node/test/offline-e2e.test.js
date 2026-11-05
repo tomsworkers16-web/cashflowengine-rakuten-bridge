@@ -49,12 +49,15 @@ test('offline end-to-end: Rakuten item -> PR copy -> mock Threads POST -> durabl
     const corePort=await freePort();
     const jst=new Date(Date.now()+9*3600000);
     const slot=String(jst.getUTCHours()).padStart(2,'0')+':'+String(jst.getUTCMinutes()).padStart(2,'0');
+    const minutes=jst.getUTCHours()*60+jst.getUTCMinutes();
+    const earlier=(minutes+1440-30)%1440;
+    const earlierSlot=String(Math.floor(earlier/60)).padStart(2,'0')+':'+String(earlier%60).padStart(2,'0');
     const env={...process.env,
       CFE_DATA_DIR:directory,THREADS_PROFILE_DIR:path.join(directory,'chrome'),
       CFE_LOCAL_PORT:String(corePort),CFE_AUTO_POST_ENABLED:'true',
       CFE_IMAGE_CARD_ENABLED:'false',CFE_IMAGE_POST_ENABLED:'false',
       CFE_EXTERNAL_REPLY_ENABLED:'false',CFE_CATCH_UP:'false',
-      CFE_POST_SLOTS:slot,CFE_MAX_POSTS_PER_DAY:'3',CFE_SLOT_WINDOW_MINUTES:'20',
+      CFE_POST_SLOTS:earlierSlot+','+slot,CFE_MAX_POSTS_PER_DAY:'3',CFE_SLOT_WINDOW_MINUTES:'20',
       RAKUTEN_KEYWORDS:'test',THREADS_ACCESS_TOKEN:'offline-dummy',
       THREADS_USER_ID:'mock-user',THREADS_API_BASE:'http://127.0.0.1:'+apiPort+'/v1.0',
       RAKUTEN_API_BASE:'http://127.0.0.1:'+apiPort+'/rakuten',
