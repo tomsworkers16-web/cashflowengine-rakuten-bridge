@@ -1,0 +1,39 @@
+name: M8 safe-publishing checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'm8-agent-node/src/**'
+      - 'm8-agent-node/test/**'
+      - 'm8-agent-node/package.json'
+      - '.github/workflows/m8-safe-publishing.yml'
+  pull_request:
+    paths:
+      - 'm8-agent-node/src/**'
+      - 'm8-agent-node/test/**'
+      - 'm8-agent-node/package.json'
+      - '.github/workflows/m8-safe-publishing.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24']
+    defaults:
+      run:
+        working-directory: m8-agent-node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: JavaScript syntax checks
+        run: npm run check
+      - name: Offline safety tests (no credentials, no posting)
+        run: npm test
