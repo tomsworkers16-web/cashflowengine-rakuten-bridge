@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
+import { shouldRunNightly, nightlyWindow } from './nightly-schedule.js';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText, validatePublicationText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
@@ -65,7 +67,10 @@ let state = {
   lastImagePostResult: null,
   lastImageTemplate: null,
   lastImagePostError: null,
-  imageFallbackUsed: false
+  imageFallbackUsed: false,
+  lastNightEvalAttemptDay: null,
+  lastNightEvalCompletedDay: null,
+  lastNightEvalError: null
 };
 
 try {
@@ -318,6 +323,37 @@ async function postFor(slot, { catchup = false } = {}) {
   saveState(); event('POSTED', { id, slot, role: meta.role, itemCode: meta.itemCode || null, catchup });
 }
 
+// Runs a separate non-posting reporting process at 23:45 JST once per day.
+let nightlyBusy=false;
+async function nightlyTick() {
+  if(nightlyBusy) return;
+  const nowMs=Date.now();
+  if(!shouldRunNightly({nowMs,lastCompletedDay:state.lastNightEvalCompletedDay,
+    lastAttemptDay:state.lastNightEvalAttemptDay})) return;
+  nightlyBusy=true;
+  const {jstDay}=nightlyWindow(nowMs);
+  state.lastNightEvalAttemptDay=jstDay;
+  saveState();
+  event('NIGHT_EVAL_STARTED',{jstDay});
+  try {
+    await new Promise((resolve,reject)=>{
+      const child=spawn(process.execPath,['src/operations-agent.js','night-eval'],{
+        cwd:process.cwd(),env:process.env,windowsHide:true,stdio:['ignore','ignore','pipe']
+      });
+      let errorText='';
+      child.stderr.on('data',chunk=>{errorText=(errorText+String(chunk)).slice(-500);});
+      child.once('error',reject);
+      child.once('exit',code=>code===0?resolve():reject(new Error('night_eval_exit_'+code+' '+errorText)));
+    });
+    state.lastNightEvalCompletedDay=jstDay;
+    state.lastNightEvalError=null;
+    event('NIGHT_EVAL_COMPLETED',{jstDay});
+  } catch(e) {
+    state.lastNightEvalError=String(e.message||'night_eval_failed').slice(0,250);
+    event('NIGHT_EVAL_ERROR',{jstDay,error:state.lastNightEvalError});
+  } finally {nightlyBusy=false;saveState();}
+}
+
 let postingBusy = false;
 async function postingTick() {
   if (postingBusy) return;
@@ -486,4 +522,6 @@ saveState();
 event('M8_LOCAL_CORE_STARTED', { version: state.version, slots: SLOTS, autoPostEnabled: AUTO_POST_ENABLED, externalReplyEnabled: EXTERNAL_REPLY_ENABLED });
 postingTick();
 setInterval(() => postingTick().catch(() => {}), 60000);
+nightlyTick().catch(e=>event('NIGHT_EVAL_ERROR',{error:e.message}));
+setInterval(() => nightlyTick().catch(e=>event('NIGHT_EVAL_ERROR',{error:e.message})), 60000);
 browserLoop().catch(() => {});
