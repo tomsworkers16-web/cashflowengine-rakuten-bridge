@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { summarizePostJournal } from './report-posts.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -106,7 +107,9 @@ async function getPostInsights(posts) {
 
 async function buildNightReport(day = dayKey()) {
   const state = readJson(stateFile, {});
-  const posts = readJsonl(postsFile).filter(x => withinDay(x, day));
+  const postJournal = readJsonl(postsFile).filter(x => withinDay(x, day));
+  const postSummary = summarizePostJournal(postJournal);
+  const posts = postSummary.published;
   const replies = readJsonl(repliesFile).filter(x => withinDay(x, day));
   const events = readJsonl(eventsFile).filter(x => withinDay(x, day));
   const candidates = readJson(candidatesFile, { candidates: [] })?.candidates || [];
@@ -115,7 +118,7 @@ async function buildNightReport(day = dayKey()) {
   const errors = events.filter(x => /ERROR|REAUTH|FAILED/.test(String(x.type || '')));
   const accountInsights = await getAccountInsights(day);
   const postInsights = await getPostInsights(posts);
-  const status = !state.browserOk || replyFailed.length > 0 || eventCount(events, 'POST_ERROR') > 0 ? 'CAUTION' : 'NORMAL';
+  const status = !state.browserOk || replyFailed.length > 0 || postSummary.uncertainAttempts > 0 || eventCount(events, 'POST_ERROR') > 0 ? 'CAUTION' : 'NORMAL';
 
   const report = {
     version: 'm8-night-eval-v2-insights',
@@ -123,8 +126,9 @@ async function buildNightReport(day = dayKey()) {
     jstDate: day,
     status,
     actuals: {
-      posts: posts.length,
-      postsByRole: posts.reduce((a, x) => { const k = x?.meta?.role || 'unknown'; a[k] = (a[k] || 0) + 1; return a; }, {}),
+      posts: postSummary.posts,
+      postsByRole: postSummary.postsByRole,
+      uncertainPostingAttempts: postSummary.uncertainAttempts,
       externalRepliesPosted: replyPosted.length,
       externalRepliesFailed: replyFailed.length,
       latestCandidateCount: candidates.length,
