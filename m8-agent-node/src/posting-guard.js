@@ -73,3 +73,7 @@ export function findRecoverablePosts(journal, officialPosts, day) {
   }
   return matches;
 }
+
+export function imageSubmitMayHaveHappened(result, error) {
+  return Boolean(result?.submitAttempted || error?.submitAttempted);
+}
