@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { URL } from 'node:url';
 import { chromium } from 'playwright-core';
 import { shouldRunNightly, nightlyWindow } from './nightly-schedule.js';
+import { isRakutenRateLimitError, rakutenCooldownRemaining } from './rakuten-rate-policy.js';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText, validatePublicationText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
@@ -70,7 +71,8 @@ let state = {
   imageFallbackUsed: false,
   lastNightEvalAttemptDay: null,
   lastNightEvalCompletedDay: null,
-  lastNightEvalError: null
+  lastNightEvalError: null,
+  lastRakutenRateLimitAt: null
 };
 
 try {
@@ -164,7 +166,7 @@ function itemScore(i) {
 async function rakutenBest(keyword, excluded = new Set(), role = 'discovery') {
   if (!RAKUTEN_APPLICATION_ID || !RAKUTEN_ACCESS_KEY || !RAKUTEN_AFFILIATE_ID) throw new Error('rakuten_credentials_missing');
   const q = new URLSearchParams({ applicationId: RAKUTEN_APPLICATION_ID, accessKey: RAKUTEN_ACCESS_KEY, affiliateId: RAKUTEN_AFFILIATE_ID, keyword, format: 'json', hits: '20', sort: '-reviewCount', availability: '1', imageFlag: '1' });
-  const data = await fetchJson(`${RAKUTEN_API_BASE}?${q}`, { attempts: 2 });
+  const data = await fetchJson(`${RAKUTEN_API_BASE}?${q}`, { attempts: 1 });
   const items = (data.Items || data.items || []).map(normalizeItem)
     .filter(i => i.itemName && i.itemCode && i.price > 0 && /^https:\/\//.test(i.affiliateUrl))
     .sort((a, b) => itemScore(b) - itemScore(a));
@@ -191,6 +193,11 @@ function dueSlot() {
 }
 
 async function postFor(slot, { catchup = false } = {}) {
+  const cooldownSeconds = rakutenCooldownRemaining(state.lastRakutenRateLimitAt);
+  if (cooldownSeconds > 0) {
+    state.lastDecision = 'rakuten_rate_limit_cooldown';
+    return;
+  }
   const official = await threadsToday();
   if (official.length >= MAX_POSTS) { state.lastDecision = 'daily_cap_reached'; return; }
   if (todayLocalPosts().some(p => p.slot === slot)) { state.lastDecision = 'slot_already_posted'; return; }
@@ -211,7 +218,16 @@ async function postFor(slot, { catchup = false } = {}) {
         chosenItem = item;
         Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue' });
       }
-    } catch (e) { event('RAKUTEN_PRODUCT_ERROR', { keyword: kw, error: e.message }); }
+    } catch (e) {
+      event('RAKUTEN_PRODUCT_ERROR', { keyword: kw, error: e.message });
+      if (isRakutenRateLimitError(e)) {
+        state.lastRakutenRateLimitAt = new Date().toISOString();
+        state.lastDecision = 'rakuten_rate_limit_cooldown';
+        event('RAKUTEN_RATE_LIMIT_COOLDOWN', { until: new Date(Date.now() + 30 * 60000).toISOString() });
+        saveState();
+        return; // No other keyword calls or editorial fallback after HTTP 429.
+      }
+    }
   }
   if (!text) {
     if (role === 'revenue') {
