@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
-import { publishTextOnce, findRecoverablePosts, postedNearAttempt } from './posting-guard.js';
+import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -248,7 +248,7 @@ async function postFor(slot, { catchup = false } = {}) {
       append(postsFile, {at:imageAttemptAt, jstDate:dayKey(), slot, id:null, text,
         meta:{...meta,publishStatus:'pending',imageTemplate:imageCard.template}});
       const result = await publishImageBrowser(imageBrowserContext, imageCard.path, text);
-      imageSubmitAttempted = Boolean(result.submitAttempted);
+      imageSubmitAttempted = imageSubmitMayHaveHappened(result);
       state.lastImagePostResult = result.status;
       // The browser's submit click is NOT a durable success guarantee.
       // Check the official API; never blindly publish the same text through the API.
@@ -267,7 +267,7 @@ async function postFor(slot, { catchup = false } = {}) {
         return;
       }
     } catch (e) {
-      imageSubmitAttempted = imageSubmitAttempted || Boolean(e.submitAttempted);
+      imageSubmitAttempted = imageSubmitAttempted || imageSubmitMayHaveHappened(null, e);
       state.lastImagePostResult = imageSubmitAttempted ? 'uncertain' : 'failed_before_submit';
       state.lastImagePostError = e.message;
       event('IMAGE_POST_ERROR', { slot, error: e.message, submitAttempted: imageSubmitAttempted });
