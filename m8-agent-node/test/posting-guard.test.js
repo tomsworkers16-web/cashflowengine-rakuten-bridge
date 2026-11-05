@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publishTextOnce, findRecoverablePosts, postedNearAttempt } from '../src/posting-guard.js';
+import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from '../src/posting-guard.js';
 
 const args = (overrides = {}) => ({
   text:'【PR】商品はこちら', slot:'12:30',jstDate:'2026-11-05',
@@ -107,4 +107,10 @@ test('reconciliation refuses missing timestamps and old same-text posts',()=>{
   assert.deepEqual(findRecoverablePosts([pending,uncertain],[{id:'old',text:'same',timestamp:'2026-11-05T01:30:00Z'}],'2026-11-05'),[]);
   assert.deepEqual(findRecoverablePosts([pending,uncertain],[{id:'missing-date',text:'same'}],'2026-11-05'),[]);
   assert.equal(postedNearAttempt({timestamp:'2026-11-05T03:31:00Z'},pending.at),true);
+});
+
+test('browser submit attempt is never treated as a safe text fallback',()=>{
+  assert.equal(imageSubmitMayHaveHappened({submitAttempted:true}),true);
+  assert.equal(imageSubmitMayHaveHappened(null,{submitAttempted:true}),true);
+  assert.equal(imageSubmitMayHaveHappened({submitAttempted:false}),false);
 });
