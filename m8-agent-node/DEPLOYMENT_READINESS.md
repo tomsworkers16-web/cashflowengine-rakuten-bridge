@@ -34,3 +34,16 @@ The script stops on uncommitted tracked edits, wrong branch, missing local `.env
 failed fast-forward, failed tests, or failed API verification. It deliberately does
 not restart the M8 core, edit secrets, publish Threads posts, or enable auto-post.
 After checks, inspect existing service processes before a separate controlled restart.
+
+## Optional Windows unattended startup
+
+`Run-M8-Core.ps1` supervises the local Node core. If it exits unexpectedly, the watchdog restarts it after 30 seconds, logging to `.data/logs/m8-core.log`. It does not change settings, enable posting, or connect to a new service.
+
+`Install-M8-Startup.ps1` creates one shortcut in the **current Windows user's Startup folder**. It must be run once by that user, after the M8 tests are complete and the core has been stopped. There is no administrator requirement. The agent then starts when this Windows user logs on, **not** before login or during Windows sleep.
+
+Run only after confirming the configuration:
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-M8-Startup.ps1
+```
+
+If another process already owns the core port, the watchdog exits without launching a duplicate core. Remove the Startup shortcut named `Cash Flow Engine M8.lnk` to disable automatic start. This is a user-login startup option, not an always-on Windows service. Power loss, hibernation and unavailable internet still require operational monitoring.
