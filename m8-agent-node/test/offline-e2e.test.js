@@ -44,6 +44,7 @@ test('offline end-to-end: Rakuten item -> PR copy -> mock Threads POST -> durabl
     res.statusCode=404;return res.end(JSON.stringify({error:'mock_404'}));
   });
   let agent=null;
+  let agentLog='';
   try{
     const apiPort=await listen(api);
     const corePort=await freePort();
@@ -63,7 +64,9 @@ test('offline end-to-end: Rakuten item -> PR copy -> mock Threads POST -> durabl
       RAKUTEN_API_BASE:'http://127.0.0.1:'+apiPort+'/rakuten',
       RAKUTEN_APPLICATION_ID:'offline-dummy',RAKUTEN_ACCESS_KEY:'offline-dummy',
       RAKUTEN_AFFILIATE_ID:'offline-dummy'};
-    agent=spawn(process.execPath,['src/local-core-v2.js'],{cwd:process.cwd(),env,stdio:'ignore'});
+    agent=spawn(process.execPath,['src/local-core-v2.js'],{cwd:process.cwd(),env,stdio:['ignore','pipe','pipe']});
+    agent.stdout.on('data',v=>{agentLog+=v.toString().slice(0,4000);});
+    agent.stderr.on('data',v=>{agentLog+=v.toString().slice(0,4000);});
     const journal=path.join(directory,'posts.jsonl');
     let rows=[];
     const until=Date.now()+12000;
@@ -74,7 +77,7 @@ test('offline end-to-end: Rakuten item -> PR copy -> mock Threads POST -> durabl
       }
       await delay(100);
     }
-    assert.equal(mock.posts,1,'exactly one mock Threads POST');
+    assert.equal(mock.posts,1,'exactly one mock Threads POST; agent log: '+agentLog.slice(-3000));
     assert.match(mock.requestText,/【PR・アフィリエイト】/);
     assert.match(mock.requestText,/https:\/\/example\.invalid\/affiliate\/demo123/);
     assert.deepEqual(rows.map(x=>x.meta.publishStatus),['pending','posted']);
