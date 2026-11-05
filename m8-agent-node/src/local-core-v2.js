@@ -240,6 +240,7 @@ async function postFor(slot, { catchup = false } = {}) {
     }
   }
   if (IMAGE_POST_ENABLED && imageCard && imageBrowserContext) {
+    let imageSubmitAttempted = false;
     try {
       // Write an intent *before* any browser interaction, so process crashes never
       // cause blind resubmission of a possibly published image.
@@ -247,6 +248,7 @@ async function postFor(slot, { catchup = false } = {}) {
       append(postsFile, {at:imageAttemptAt, jstDate:dayKey(), slot, id:null, text,
         meta:{...meta,publishStatus:'pending',imageTemplate:imageCard.template}});
       const result = await publishImageBrowser(imageBrowserContext, imageCard.path, text);
+      imageSubmitAttempted = Boolean(result.submitAttempted);
       state.lastImagePostResult = result.status;
       // The browser's submit click is NOT a durable success guarantee.
       // Check the official API; never blindly publish the same text through the API.
@@ -265,10 +267,11 @@ async function postFor(slot, { catchup = false } = {}) {
         return;
       }
     } catch (e) {
-      state.lastImagePostResult = e.submitAttempted ? 'uncertain' : 'failed_before_submit';
+      imageSubmitAttempted = imageSubmitAttempted || Boolean(e.submitAttempted);
+      state.lastImagePostResult = imageSubmitAttempted ? 'uncertain' : 'failed_before_submit';
       state.lastImagePostError = e.message;
-      event('IMAGE_POST_ERROR', { slot, error: e.message, submitAttempted: Boolean(e.submitAttempted) });
-      if (e.submitAttempted) {
+      event('IMAGE_POST_ERROR', { slot, error: e.message, submitAttempted: imageSubmitAttempted });
+      if (imageSubmitAttempted) {
         // Uncertain post outcome: do not text-fallback or retry, to avoid duplicates.
         state.lastDecision = 'image_publish_uncertain';
         append(postsFile, { at: new Date().toISOString(), jstDate: dayKey(), slot, id: null, text, meta: { ...meta, publishStatus: 'uncertain' } });
