@@ -21,7 +21,10 @@ $branch = (git branch --show-current).Trim()
 if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') {
     throw "Expected main branch; found '$branch'. Aborting."
 }
-Invoke-Checked 'git' @('pull','--ff-only')
+# Avoid ambiguous local branch.merge configuration. Fetch only the production branch,
+# then fast-forward main to the fetched main commit.
+Invoke-Checked 'git' @('fetch','origin','main')
+Invoke-Checked 'git' @('merge','--ff-only','FETCH_HEAD')
 Invoke-Checked 'npm.cmd' @('run','check')
 Invoke-Checked 'npm.cmd' @('test')
 Invoke-Checked 'npm.cmd' @('run','check-secrets')
