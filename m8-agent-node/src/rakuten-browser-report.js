@@ -151,7 +151,7 @@ export function summarizeVisibleReportDayCells(values){
  const dates=new Set();
  for(const input of (Array.isArray(values)?values:[]).slice(0,120)){
   const v=String(input||'').trim().normalize('NFKC');
-  if(/^(?:20\\d{2}[-\\/年])?\\d{1,2}[-\\/月]\\d{1,2}日?$/.test(v))
+  if(/^(?:20\d{2}[-\/年])?\d{1,2}[-\/月]\d{1,2}日?$/.test(v))
    dates.add(v);
  }
  return {visibleDateRowCount:dates.size,hasDatedRows:dates.size>0};
