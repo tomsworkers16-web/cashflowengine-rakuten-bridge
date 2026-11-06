@@ -3,7 +3,8 @@
 export function diagnoseFirstCommission({affiliateResults,threadsInsights}={}){
  const a=affiliateResults||{};
  const account=threadsInsights?.account||{};
- const views=Number.isFinite(account.metrics?.views)?account.metrics.views:null;
+ // Account insights 'views' must not be counted as post impressions.
+ const accountViews=Number.isFinite(account.metrics?.views)?account.metrics.views:null;
  const clicks=Number.isFinite(a.clicks)?a.clicks:null;
  const sales=Number.isFinite(a.salesCount)?a.salesCount:null;
  const reward=Number.isFinite(a.rewardYen)?a.rewardYen:null;
@@ -36,7 +37,8 @@ export function diagnoseFirstCommission({affiliateResults,threadsInsights}={}){
  }
  return {
   stage,priority,nextAction:action,
-  threadsViews:views??'unknown',
+  threadsViews:'unknown', // Kept for report compatibility; not proven post impressions.
+  accountViewsMetric:accountViews??'unknown',
   rakutenClicks:clicks??'unknown',
   rakutenSalesCount:sales??'unknown',
   rakutenRewardYen:reward??'unknown',

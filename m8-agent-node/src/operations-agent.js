@@ -171,8 +171,14 @@ async function buildNightReport(day = dayKey()) {
       posts: postInsights
     },
     funnel: {
-      // Views are exposure, not profile visits. Do not mislabel them as profile views.
-      threadsViews: accountInsights.metrics.views ?? 'unknown',
+      // Account-level views are NOT interchangeable with per-post impressions.
+      // Keep the old field unknown rather than silently asserting exposure.
+      threadsViews: 'unknown',
+      accountViewsMetric: accountInsights.metrics.views ?? 'unknown',
+      postLifetimeViewsObserved: postInsights.some(p=>Number.isFinite(p.metrics?.views))
+        ? postInsights.reduce((sum,p)=>sum+(Number.isFinite(p.metrics?.views)?p.metrics.views:0),0)
+        : 'unknown',
+      postLifetimeViewsMeasuredCount: postInsights.filter(p=>Number.isFinite(p.metrics?.views)).length,
       profileViews: 'unknown',
       threadsLinkClicks: accountInsights.metrics.clicks ?? 'unknown',
       followersCount: accountInsights.metrics.followers_count ?? 'unknown',
