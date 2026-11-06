@@ -14,7 +14,7 @@ test('missing reward measurement is never interpreted as zero commission',()=>{
  assert.equal(x.affiliateClickAttribution,'unknown');
 });
 test('observed low reach is prioritized before click claims when exposure is sparse',()=>{
- const x=firstRevenuePriority(make({exposure:{affiliatePostLifetimeViewsObserved:11,affiliatePostsWithViews:1},
+ const x=firstRevenuePriority(make({exposure:{affiliatePosts:1,affiliatePostLifetimeViewsObserved:11,affiliatePostsWithViews:1},
  sevenDay:{daysReported:0,rakutenClicks:'unknown'}}));
  assert.equal(x.stage,'low_observed_exposure');
  assert.equal(x.automaticPublishingChange,false);
@@ -52,4 +52,18 @@ test('partial-period click and sales zeros never trigger false conversion diagno
  const complete=firstRevenuePriority(make({sevenDay:{daysReported:7,
   rakutenClicks:0,clicksCoverageComplete:true}}));
  assert.equal(complete.stage,'no_reported_rakuten_clicks');
+});
+
+test('partial post insights do not misclassify low total reach',()=>{
+ const x=firstRevenuePriority(make({exposure:{
+  affiliatePosts:5,affiliatePostsWithViews:1,affiliatePostLifetimeViewsObserved:11
+ }}));
+ assert.equal(x.stage,'partial_post_exposure');
+ assert.equal(x.priority,'complete_post_insights');
+ assert.equal(x.unmeasuredPosts,4);
+ assert.equal(x.automaticPublishingChange,false);
+ const all=firstRevenuePriority(make({exposure:{
+  affiliatePosts:5,affiliatePostsWithViews:5,affiliatePostLifetimeViewsObserved:11
+ }}));
+ assert.equal(all.stage,'low_observed_exposure');
 });
