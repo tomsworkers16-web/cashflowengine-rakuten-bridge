@@ -19,6 +19,12 @@ export function firstRevenuePriority({exposure={},sevenDay={},captureConsistency
  if(!Number.isInteger(posts)||!Number.isInteger(measured)||measured===0
    ||!Number.isFinite(views))return {...base,stage:'post_exposure_unknown',
   priority:'restore_post_insights',why:'収益投稿の表示実績が未取得です。閲覧0回とは断定できません。'};
+ // Missing post insights must not be silently treated as zero views.
+ // A partial measured subset cannot establish total exposure in the window.
+ if(measured<posts)return {...base,stage:'partial_post_exposure',
+  priority:'complete_post_insights',
+  measuredPosts:measured,unmeasuredPosts:posts-measured,
+  why:'一部の収益投稿の閲覧数が未取得です。計測済み投稿の合計を全投稿の表示数とは扱いません。'};
  // Low observed exposure is a hypothesis, not proof of poor distribution.
  if(views<100)return {...base,stage:'low_observed_exposure',
   priority:'improve_distribution_and_hooks',
