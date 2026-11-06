@@ -24,7 +24,17 @@ export async function runRakutenNightlyCapture(dataDir, {
  };
  let fd;
  try{fd=fs.openSync(lockPath,'wx');}
- catch{return {status:'capture_already_running',jstDay:day,noPosting:true};}
+ catch{
+  // A power outage can leave an orphan lock. Recovery is safe because the
+  // persisted day guard still prevents repeat exports for the same day.
+  try{
+   if(now-fs.statSync(lockPath).mtimeMs>3*3600000){
+    fs.rmSync(lockPath,{force:true});
+    fd=fs.openSync(lockPath,'wx');
+   }
+  }catch{}
+  if(fd===undefined)return {status:'capture_already_running',jstDay:day,noPosting:true};
+ }
  try{
   // Lock and reread after acquiring, avoiding two concurrent nightly tasks.
   if(fs.existsSync(statePath)){
