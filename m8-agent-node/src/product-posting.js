@@ -1,7 +1,14 @@
 // Product-first editorial copy. Uses only official API product data.
 export function cleanProductName(value = '', limit = 44) {
   const raw = String(value).replace(/[\r\n\t]/g,' ')
-    .replace(/【[^】]{0,36}】/g,' ').replace(/\[[^\]]{0,36}\]/g,' ')
+    // Rakuten listings often begin with a dated promotion, before the real
+    // product title. Do not let it crowd out the product identity.
+    .replace(/^\s*\d{1,2}\/\d{1,2}\s+\d{1,2}:\d{2}まで[^！!]{0,100}[！!]\s*/u,' ')
+    .replace(/《[^》]{0,40}(?:楽天|ランキング|第[１２３123]位)[^》]*》/gu,' ')
+    .replace(/【([^】]{0,100})】/gu,(_all,inner)=>
+      /送料無料|クーポン|セール|ポイント|エントリー|本日限定|新登場|楽天[１1]位|オトク/u.test(inner)
+        ? ' ' : ' '+inner+' ')
+    .replace(/\[[^\]]{0,36}\]/g,' ')
     .replace(/\s+/g,' ').trim();
   if (raw.length <= limit) return raw;
   const prefix = raw.slice(0,limit);

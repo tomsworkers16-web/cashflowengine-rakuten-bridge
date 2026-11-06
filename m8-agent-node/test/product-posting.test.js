@@ -76,3 +76,21 @@ test('affiliate copy experiments preserve disclosure, price and exact URL',()=>{
  }
  assert.notEqual(revenueText(item,'spec_check'),revenueText(item,'compare_before_buy'));
 });
+
+test('publicly observed Rakuten promotional title keeps the actual product name',()=>{
+ const listing='11/11 1:59までエントリーでP5倍！ 《楽天１位》【待望のスモールサイズ新登場！】《楽天１位》【 HUBATH 洗面台 ヘアーキャッチャー 】 排水口 ゴミ受け 排水溝 掃除 排水溝ネット';
+ const name=cleanProductName(listing);
+ assert.ok(name.startsWith('HUBATH 洗面台 ヘアーキャッチャー'),name);
+ assert.ok(!name.includes('エントリー'));
+ assert.ok(!name.includes('楽天１位'));
+ const url='https://hb.afl.rakuten.co.jp/hgc/example/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fsinkatec%2Fhu_shair_catcher%2F';
+ const body=revenueText({itemName:listing,price:1980,affiliateUrl:url},'compare_before_buy');
+ assert.ok(body.includes('HUBATH 洗面台 ヘアーキャッチャー'));
+ assert.equal(validatePublicationText(body,{affiliateUrl:url,revenue:true}),null);
+});
+
+test('bracketed substantive product titles are preserved, marketing tags removed',()=>{
+ assert.equal(cleanProductName('【送料無料】 包丁スタンド'),'包丁スタンド');
+ assert.equal(cleanProductName('【セール】商品\n名'),'商品 名');
+ assert.equal(cleanProductName('【HUBATH 洗面台 ヘアーキャッチャー】'),'HUBATH 洗面台 ヘアーキャッチャー');
+});
