@@ -21,8 +21,15 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
  const evidence=summarizeRecentAffiliateEvidence(ledger,day,7);
  const rejectedCsv=inspectRejectedRakutenCsv(root);
  const exportAudit=auditRakutenRejectedExports(root);
+ const captureConsistency=capture?.lastHasDatedRows===true
+  && capture?.lastExportDateValidation==='invalid_date_values'
+   ?'ui_has_dates_but_export_has_invalid_dates'
+   : capture?.lastExportDateValidation==='valid'?'validated'
+   :'not_verified';
  let nextAction='夜間自動取得と投稿の状態を継続確認する';
- if((!ledger||evidence.daysReported===0)&&rejectedCsv.latestStatus==='daily_date_value_invalid')
+ if((!ledger||evidence.daysReported===0)&&captureConsistency==='ui_has_dates_but_export_has_invalid_dates')
+  nextAction='楽天の日別画面に日付行がありますが、CSVの日付は不正です。自動投稿とは独立して楽天CSV出力方式を調査する';
+ else if((!ledger||evidence.daysReported===0)&&rejectedCsv.latestStatus==='daily_date_value_invalid')
   nextAction='楽天CSVは取得済みですが、日付値が無効です。CSVを再取得する前に楽天の日別レポート画面とエクスポートを確認する';
  else if((!ledger||evidence.daysReported===0)&&rejectedCsv.latestStatus==='valid_unimported')
   nextAction='有効な楽天CSVが保存されています。オフライン再取り込みを実行する';
@@ -42,7 +49,8 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
   core:{stateAvailable:Boolean(core),lastDecision:core?.lastDecision||'unknown',
     lastErrorPresent:Boolean(core?.lastError),lastPostAt:core?.lastPostAt||null},
   csv:{ledgerPresent:Boolean(ledger),lastCaptureAttemptDay:capture?.lastAttemptDay||null,
-    lastCaptureResult:capture?.lastResult||'unknown',lastCaptureSuccessDay:capture?.lastSuccessDay||null},
+    lastCaptureResult:capture?.lastResult||'unknown',lastCaptureSuccessDay:capture?.lastSuccessDay||null,
+    visibleDayRowCount:capture?.lastVisibleDayRowCount??'unknown',captureConsistency},
   report:{lastEvaluationDay:night?.jstDate||null,status:night?.status||'unknown'},
   rejectedCsv,
   exportAudit,
