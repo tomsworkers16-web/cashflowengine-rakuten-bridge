@@ -7,7 +7,7 @@ import { chromium } from 'playwright-core';
 import { shouldRunNightly, nightlyWindow } from './nightly-schedule.js';
 import { isRakutenRateLimitError, rakutenCooldownRemaining } from './rakuten-rate-policy.js';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
-import { roleForSlot, editorialText, revenueText, validatePublicationText } from './product-posting.js';
+import { roleForSlot, editorialText, revenueText, revenueCopyVariant, validatePublicationText } from './product-posting.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
 import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
 
@@ -205,6 +205,7 @@ async function postFor(slot, { catchup = false } = {}) {
   let text = null;
   let chosenItem = null;
   const meta = { role, slot, catchup, copyPolicy: 'product-first-v1' };
+  const copyVariant = role === 'revenue' ? revenueCopyVariant(dayKey()) : null;
   const used = recentlyFeaturedItems();
   const keywordBase = (nowJst().getUTCDate() + Math.max(0, SLOTS.indexOf(slot))) % KEYWORDS.length;
   for (let attempt = 0; attempt < Math.min(KEYWORDS.length, 3) && !text; attempt++) {
@@ -213,10 +214,10 @@ async function postFor(slot, { catchup = false } = {}) {
       state.lastRakutenKeyword = kw;
       const item = await rakutenBest(kw, used, role);
       if (!item) continue;
-      text = role === 'revenue' ? revenueText(item) : editorialText(item, role);
+      text = role === 'revenue' ? revenueText(item,copyVariant) : editorialText(item, role);
       if (text) {
         chosenItem = item;
-        Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue' });
+        Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue', ...(copyVariant ? {copyVariant} : {}) });
       }
     } catch (e) {
       event('RAKUTEN_PRODUCT_ERROR', { keyword: kw, error: e.message });
