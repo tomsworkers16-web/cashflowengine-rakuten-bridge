@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { summarizePostJournal } from './report-posts.js';
 import { summarizeAffiliateDay } from './revenue-metrics.js';
-import { scanRakutenInbox } from './rakuten-report-importer.js';
+import { scanRakutenInbox, recoverRakutenRejectedFiles } from './rakuten-report-importer.js';
 import { intakeRakutenDownloads } from './rakuten-download-intake.js';
 import { operationalAdvice } from './ops-policy.js';
 import { decideRevenueActions } from './nightly-schedule.js';
@@ -116,6 +116,7 @@ async function buildNightReport(day = dayKey()) {
   const postSummary = summarizePostJournal(postJournal);
   const affiliateCapture = intakeRakutenDownloads(dataDir,process.env.RAKUTEN_REPORT_DOWNLOAD_DIR);
   const affiliateImport = scanRakutenInbox(dataDir);
+  const affiliateRecovery = recoverRakutenRejectedFiles(dataDir);
   const affiliate = summarizeAffiliateDay(readJson(path.join(dataDir, 'affiliate-results.json'), null), day);
   const posts = postSummary.published;
   const replies = readJsonl(repliesFile).filter(x => withinDay(x, day));
@@ -172,6 +173,7 @@ async function buildNightReport(day = dayKey()) {
     affiliateResults: affiliate,
     affiliateCapture,
     affiliateImport,
+    affiliateRecovery,
     decisions: {
       ...operationalAdvice({
         autoPosting: String(process.env.CFE_AUTO_POST_ENABLED || 'false').toLowerCase() === 'true',
