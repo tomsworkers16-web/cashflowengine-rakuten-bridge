@@ -1,8 +1,14 @@
 // Exploratory attention comparison for affiliate copy hypotheses.
 // Post impressions are NOT affiliate clicks or attributable commissions.
 export function summarizeRevenueCopyVariants(publishedPosts=[],postInsights=[]) {
- const viewsById=new Map((Array.isArray(postInsights)?postInsights:[])
-  .filter(x=>x&&typeof x.id==='string').map(x=>[x.id,x.metrics?.views]));
+ // Keep the most recent finite view count available for each post.
+ // API outages in a later snapshot cannot erase an earlier valid reading.
+ const viewsById=new Map();
+ for(const insight of Array.isArray(postInsights)?postInsights:[]){
+  if(!insight||typeof insight.id!=='string')continue;
+  const views=insight.metrics?.views;
+  if(Number.isFinite(views)&&views>=0)viewsById.set(insight.id,views);
+ }
  const groups=new Map();
  for(const p of Array.isArray(publishedPosts)?publishedPosts:[]){
   if(p?.meta?.role!=='revenue'||typeof p.id!=='string')continue;

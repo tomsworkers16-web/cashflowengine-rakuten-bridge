@@ -32,3 +32,18 @@ test('only measured post views count toward an exploratory comparison',()=>{
  assert.equal(missing.exploratoryComparisonReady,false);
  assert.ok(missing.variants.some(v=>v.missingViews>0));
 });
+
+test('historical report views accumulate across days and an API error cannot erase them',()=>{
+ const posts=[];
+ const historical=[];
+ for(let i=0;i<4;i++){
+  posts.push(post('odd'+i,'spec_check'),post('even'+i,'compare_before_buy'));
+  historical.push(insight('odd'+i,70),insight('even'+i,100));
+ }
+ historical.push({id:'odd0',metrics:{views:'unknown'}});
+ const result=summarizeRevenueCopyVariants(posts,historical);
+ assert.equal(result.exploratoryComparisonReady,true);
+ assert.equal(result.variants.find(x=>x.variant==='spec_check').totalViews,280);
+ assert.equal(result.variants.find(x=>x.variant==='compare_before_buy').totalViews,400);
+ assert.equal(result.automatedWinnerSelection,false);
+});
