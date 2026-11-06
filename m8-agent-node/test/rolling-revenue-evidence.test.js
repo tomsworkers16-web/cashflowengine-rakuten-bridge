@@ -35,3 +35,28 @@ test('unknown days are never counted as zero, and total profit needs full eviden
  const one=summarizeRecentAffiliateEvidence(ledger,'2026-11-06',1);
  assert.equal(one.confirmedNetProfitYen,80);
 });
+
+test('separate metric coverage prevents partial zero from becoming full-period zero',()=>{
+ const rows={records:[
+  {jstDate:'2026-11-05',source:'rakuten_csv_period_daily',recordId:'period:2026-11-05',
+   clicks:0,salesCount:0,rewardYen:0}
+ ]};
+ const partial=summarizeRecentAffiliateEvidence(rows,'2026-11-06',7);
+ assert.equal(partial.rakutenClicksReported,0);
+ assert.equal(partial.metricCoverage.clicks.daysMeasured,1);
+ assert.equal(partial.metricCoverage.clicks.complete,false);
+ assert.equal(partial.metricCoverage.salesCount.complete,false);
+ const one=summarizeRecentAffiliateEvidence(rows,'2026-11-05',1);
+ assert.equal(one.metricCoverage.clicks.complete,true);
+});
+test('reported daily record can still have a missing click column',()=>{
+ const rows={records:[
+  {jstDate:'2026-11-05',source:'rakuten_csv_period_daily',recordId:'period:2026-11-05',
+   rewardYen:0,salesCount:0}
+ ]};
+ const report=summarizeRecentAffiliateEvidence(rows,'2026-11-05',1);
+ assert.equal(report.daysReported,1);
+ assert.equal(report.metricCoverage.clicks.daysMeasured,0);
+ assert.equal(report.metricCoverage.clicks.complete,false);
+ assert.equal(report.metricCoverage.rewardYen.complete,true);
+});

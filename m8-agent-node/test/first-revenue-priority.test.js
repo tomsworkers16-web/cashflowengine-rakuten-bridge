@@ -39,3 +39,17 @@ test('verified page and broken download changes remediation priority',()=>{
  const x=firstRevenuePriority(make({sevenDay:{daysReported:0,rakutenClicks:'unknown'},captureConsistency:'ui_has_dates_but_export_has_invalid_dates'}));
  assert.equal(x.priority,'repair_export_mismatch');
 });
+
+test('partial-period click and sales zeros never trigger false conversion diagnosis',()=>{
+ const partialClick=firstRevenuePriority(make({sevenDay:{
+  daysReported:1,rakutenClicks:0,clicksCoverageComplete:false}}));
+ assert.equal(partialClick.stage,'partial_rakuten_clicks_zero');
+ assert.equal(partialClick.priority,'complete_rakuten_reporting');
+ const partialSales=firstRevenuePriority(make({sevenDay:{
+  daysReported:1,rakutenClicks:3,rakutenSalesCount:0,
+  clicksCoverageComplete:false,salesCoverageComplete:false}}));
+ assert.equal(partialSales.stage,'partial_sales_zero');
+ const complete=firstRevenuePriority(make({sevenDay:{daysReported:7,
+  rakutenClicks:0,clicksCoverageComplete:true}}));
+ assert.equal(complete.stage,'no_reported_rakuten_clicks');
+});

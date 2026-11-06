@@ -19,12 +19,21 @@ export function summarizeRecentAffiliateEvidence(document, targetDay, days=7){
   const values=daily.map(x=>x[key]).filter(Number.isFinite);
   return values.length?values.reduce((a,b)=>a+b,0):'unknown';
  };
+ // A seven-day partial sum is not a complete seven-day zero. Preserve
+ // evidence coverage for every metric without manufacturing missing values.
+ const metricCoverage={};
+ for(const key of ['clicks','salesCount','salesAmountYen','rewardYen']){
+  const daysMeasured=daily.filter(row=>Number.isFinite(row[key])).length;
+  metricCoverage[key]={daysMeasured,daysMissing:days-daysMeasured,
+   complete:daysMeasured===days};
+ }
  const reported=daily.filter(x=>x.reported);
  const commissionDays=daily.filter(x=>Number.isFinite(x.rewardYen)&&x.rewardYen>0);
  const profitComplete=daily.every(x=>x.reported&&Number.isFinite(x.profitYen));
  return {
   windowDays:days,from:daily[0].date,to:targetDay,
   daysReported:reported.length,daysMissing:days-reported.length,
+  metricCoverage,
   rakutenClicksReported:aggregate('clicks'),
   rakutenSalesCountReported:aggregate('salesCount'),
   rakutenSalesAmountYenReported:aggregate('salesAmountYen'),

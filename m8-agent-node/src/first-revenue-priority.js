@@ -28,10 +28,18 @@ export function firstRevenuePriority({exposure={},sevenDay={},captureConsistency
    priority:captureConsistency==='ui_has_dates_but_export_has_invalid_dates'
     ?'repair_export_mismatch':'restore_rakuten_reporting',
    why:'楽天の有効なクリック実績が未取得です。0クリックとは扱いません。'};
+ if(clicks===0&&sevenDay.clicksCoverageComplete===false)
+  return {...base,stage:'partial_rakuten_clicks_zero',
+   priority:'complete_rakuten_reporting',
+   why:'報告済み日だけではクリック0件ですが、未報告日があります。7日間全体の0件とは判断しません。'};
  if(clicks===0)return {...base,stage:'no_reported_rakuten_clicks',
   priority:'inspect_link_and_offer',why:'楽天の報告済み期間でクリック0件。投稿とリンクのクリック動機を見直します。'};
  if(!Number.isFinite(sales))return {...base,stage:'sales_unknown',
   priority:'restore_sales_reporting',why:'クリックは記録されていますが売上件数が未取得です。'};
+ if(sales===0&&sevenDay.salesCoverageComplete===false)
+  return {...base,stage:'partial_sales_zero',
+   priority:'complete_sales_reporting',
+   why:'報告済み日だけでは売上0件ですが、未報告日があります。期間全体の成約ゼロとは断定しません。'};
  if(sales===0)return {...base,stage:'clicks_without_sales',
   priority:'improve_product_fit',why:'楽天にクリックが記録されていますが、報告済みの売上件数は0件です。'};
  return {...base,stage:'sales_without_reported_commission',
