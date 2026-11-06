@@ -228,7 +228,10 @@ function recentReports(limit = 3) {
 
 async function runDailyCommander() {
   let latest = readJson(path.join(dataDir, 'latest-night-evaluation.json'), null);
-  if (!latest) latest = await buildNightReport();
+  // Daily Commander must never open the authenticated Rakuten browser at 06:30.
+  // Only the explicit night-eval path is allowed to run CSV auto-capture.
+  // With no prior report, retain conservative baseline settings.
+  if (!latest) latest = { status: 'NORMAL', actuals: {}, threadsInsights: {account:{available:false}} };
   const history = recentReports(3);
   const current = readJson(stateFile, {});
 
