@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanProductName, editorialText, revenueText, roleForSlot, validatePublicationText } from '../src/product-posting.js';
+import { cleanProductName, editorialText, revenueText, revenueCopyVariant, roleForSlot, validatePublicationText } from '../src/product-posting.js';
 
 test('affiliate posts include a clear disclosure and the full original link', () => {
   const url = 'https://affiliate.example.jp/product?item=shop%3A10002149&affiliateId=abc';
@@ -59,4 +59,20 @@ test('guard rejects corrupted Japanese and missing PR disclosure without a netwo
   assert.equal(validatePublicationText('【PR・アフィリエイト】\nhttps://a.invalid',{
     revenue:true,affiliateUrl:'https://b.invalid'
   }),'affiliate_url_missing_or_modified');
+});
+
+test('affiliate copy experiments preserve disclosure, price and exact URL',()=>{
+ const url='https://hb.afl.rakuten.co.jp/hgc/test?pc=sku-1';
+ const item={itemName:'収納ラック',price:2480,affiliateUrl:url};
+ assert.equal(revenueCopyVariant('2026-11-05'),'spec_check');
+ assert.equal(revenueCopyVariant('2026-11-06'),'compare_before_buy');
+ for(const variant of ['spec_check','compare_before_buy']){
+  const body=revenueText(item,variant);
+  assert.equal(validatePublicationText(body,{revenue:true,affiliateUrl:url}),null);
+  assert.ok(body.startsWith('【PR・アフィリエイト】'));
+  assert.ok(body.endsWith(url));
+  assert.ok(body.includes('2,480'));
+  assert.ok(!body.includes('使ってみた'));
+ }
+ assert.notEqual(revenueText(item,'spec_check'),revenueText(item,'compare_before_buy'));
 });
