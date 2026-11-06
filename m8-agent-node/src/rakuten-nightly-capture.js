@@ -65,9 +65,22 @@ export async function runRakutenNightlyCapture(dataDir, {
    'download_control_unverified','daily_tab_unverified','untrusted_csv_export_destination',
    'report_navigation_changed','period_tab_not_found','period_tab_ambiguous']);
   const sanitized=allowed.has(status)?status:'capture_exception';
+  // Preserve only bounded structural evidence for local diagnosis. No raw
+  // CSV cells, report values, URLs, account IDs or browser contents.
+  const visibleDateRowCount=Number.isInteger(result?.visibleDays?.visibleDateRowCount)
+    && result.visibleDays.visibleDateRowCount>=0
+    && result.visibleDays.visibleDateRowCount<=120
+    ? result.visibleDays.visibleDateRowCount : 'unknown';
+  const hasDatedRows=visibleDateRowCount==='unknown'?'unknown':visibleDateRowCount>0;
+  const exportDateValidation=sanitized==='downloaded_csv_needs_valid_dates'
+    ?'invalid_date_values'
+    :sanitized==='validated_csv_captured_and_imported'?'valid':'unknown';
   write({...state,lastAttemptDay:day,lastResult:sanitized,
+   lastVisibleDayRowCount:visibleDateRowCount,lastHasDatedRows:hasDatedRows,
+   lastExportDateValidation:exportDateValidation,
    ...(sanitized==='validated_csv_captured_and_imported'?{lastSuccessDay:day}:{})});
   return {status:sanitized,jstDay:day,noPosting:true,interactive:false,
+   visibleDateRowCount,hasDatedRows,exportDateValidation,
    imported:sanitized==='validated_csv_captured_and_imported'};
  }finally{
   try{fs.closeSync(fd);}catch{}
