@@ -10,7 +10,8 @@ test('missing Rakuten data is unknown, never zero click evidence',()=>{
  const x=info({dataStatus:'not_reported',clicks:'unknown',rewardYen:'unknown'},400);
  assert.equal(x.stage,'rakuten_measurement_missing');
  assert.equal(x.rakutenClicks,'unknown');
- assert.equal(x.threadsViews,400);
+ assert.equal(x.threadsViews,'unknown');
+ assert.equal(x.accountViewsMetric,400);
  assert.match(x.attribution,/Threads投稿別/);
 });
 
