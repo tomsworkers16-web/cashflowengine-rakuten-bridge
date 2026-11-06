@@ -8,6 +8,7 @@ import { shouldRunNightly, nightlyWindow } from './nightly-schedule.js';
 import { isRakutenRateLimitError, rakutenCooldownRemaining } from './rakuten-rate-policy.js';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText, revenueCopyVariant, validatePublicationText } from './product-posting.js';
+import { keywordRelevanceBonus } from './product-relevance.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
 import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
 
@@ -169,7 +170,8 @@ async function rakutenBest(keyword, excluded = new Set(), role = 'discovery') {
   const data = await fetchJson(`${RAKUTEN_API_BASE}?${q}`, { attempts: 1 });
   const items = (data.Items || data.items || []).map(normalizeItem)
     .filter(i => i.itemName && i.itemCode && i.price > 0 && /^https:\/\//.test(i.affiliateUrl))
-    .sort((a, b) => itemScore(b) - itemScore(a));
+    .sort((a, b) => (itemScore(b)+keywordRelevanceBonus(keyword,b.itemName))
+       - (itemScore(a)+keywordRelevanceBonus(keyword,a.itemName)));
   const candidates = items.filter(i => !excluded.has(i.itemCode));
   if (IMAGE_CARD_ENABLED) {
     const licensed = candidates.find(i => approvedImageFor(i, DATA_DIR, { hasAffiliateLink: role === 'revenue' }));
