@@ -58,16 +58,27 @@ export function editorialText(item, mode = 'discovery') {
   ].filter(Boolean).join('\n\n').slice(0, 500);
 }
 
-export function revenueText(item) {
+// Rotate evidence-free copy hypotheses by JST calendar day. This is an A/B
+// experiment, not proof of causation or a promise of conversion lift.
+export function revenueCopyVariant(jstDay) {
+ const day=String(jstDay||'');
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(day))return 'spec_check';
+ const d=Number(day.slice(-2));
+ return d%2===0 ? 'compare_before_buy' : 'spec_check';
+}
+
+export function revenueText(item, variant='spec_check') {
   const url = String(item?.affiliateUrl || '');
   const name = cleanProductName(item?.itemName);
   if (!name || !/^https:\/\//.test(url) || url.length>470) return null;
   const price = Number(item.price)>0
     ? `掲載時の価格：約${Number(item.price).toLocaleString('ja-JP')}円（変動あり）` : '';
   // Never trim away required disclosure, sentence endings, or the affiliate URL.
+  const lead = variant==='compare_before_buy' ? '買う前に比較したい便利グッズ' : '今日の便利グッズ';
+  const cta = variant==='compare_before_buy' ? 'サイズ・仕様・送料を商品ページで比較してみてください。' : '購入前にサイズ・仕様を確認してね。';
   const variants = [
-    ['【PR・アフィリエイト】', '今日の便利グッズ', `「${name}」`, price,
-      '購入前にサイズ・仕様を確認してね。', url],
+    ['【PR・アフィリエイト】', lead, `「${name}」`, price,
+      cta, url],
     ['【PR・アフィリエイト】', `「${cleanProductName(item.itemName,25)}」`, price,
       '商品詳細はこちら',url],
     ['【PR・アフィリエイト】',`「${cleanProductName(item.itemName,16)}」`,url]
