@@ -94,3 +94,13 @@ test('verified preamble with stray quote is stripped, with strict five column da
  assert.equal(rows[0].salesAmountYen,1500);
  assert.throws(()=>parseRakutenDailyCsv(quotedTitle+'\n\n発生日,成果報酬,クリック数,売上件数,売上金額\n2026/11/05,3"0,5,1,1500\n'),/invalid_csv_quotes/);
 });
+
+test('rejects impossible fractional clicks, counts or yen instead of rounding revenue',()=>{
+ assert.throws(()=>parseRakutenDailyCsv('日付,クリック数,成果報酬\n2026/11/05,1.5,0\n'),/invalid_clicks/);
+ assert.throws(()=>parseRakutenDailyCsv('日付,売上件数,成果報酬\n2026/11/05,2.5,0\n'),/invalid_salesCount/);
+ assert.throws(()=>parseRakutenDailyCsv('日付,クリック数,成果報酬\n2026/11/05,2,12.5\n'),/invalid_rewardYen/);
+ assert.throws(()=>parseRakutenDailyCsv('日付,クリック数,売上金額\n2026/11/05,2,9007199254740994\n'),/invalid_salesAmountYen/);
+ const okay=parseRakutenDailyCsv('日付,クリック数,成果報酬\n2026/11/05,"1,200","¥160"\n');
+ assert.equal(okay[0].clicks,1200);
+ assert.equal(okay[0].rewardYen,160);
+});
