@@ -7,6 +7,16 @@ import {inspectOrCapture} from './rakuten-browser-report.js';
 export function rakutenAutoCaptureDay(now=Date.now()){
  return new Date(now+9*3600000).toISOString().slice(0,10);
 }
+// Suppress the next two nightly exports after a known invalid date value,
+// then try again. This does not affect manual inspect or offline imports.
+export function shouldPauseInvalidDateExport(state,day,cooldownDays=2){
+ if(state?.lastResult!=='downloaded_csv_needs_valid_dates')return false;
+ const previous=String(state.lastAttemptDay||'');
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(previous))return false;
+ const diff=(Date.parse(day+'T00:00:00+09:00')
+   -Date.parse(previous+'T00:00:00+09:00'))/86400000;
+ return Number.isInteger(diff)&&diff>0&&diff<=cooldownDays;
+}
 export async function runRakutenNightlyCapture(dataDir, {
  now=Date.now(),enabled=true,capture=inspectOrCapture
 }={}){
@@ -43,6 +53,10 @@ export async function runRakutenNightlyCapture(dataDir, {
   }
   if(state.lastAttemptDay===day)return {
    status:'already_attempted_today',jstDay:day,lastResult:state.lastResult||'unknown',noPosting:true
+  };
+  if(shouldPauseInvalidDateExport(state,day))return {
+   status:'paused_invalid_csv_dates',jstDay:day,
+   lastResult:state.lastResult,noPosting:true,noDownload:true
   };
   // Commit the attempt BEFORE entering Chrome. Never retry a clicked export
   // just because a scheduled task or Windows process was interrupted.
