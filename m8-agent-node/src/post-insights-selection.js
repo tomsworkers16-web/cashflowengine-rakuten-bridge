@@ -20,5 +20,10 @@ export function selectPostsForInsights(published, targetDay, {maxPosts=8,lookbac
  const historical=entries.filter(p=>p.jstDate!==targetDay&&p.meta?.role==='revenue')
    .sort((a,b)=>String(b.jstDate).localeCompare(String(a.jstDate))||
      String(b.at||'').localeCompare(String(a.at||'')));
- return [...current,...historical].slice(0,Math.max(0,Math.min(12,maxPosts)));
+ // Revenue attribution remains unknown, but experiment coverage should
+ // not be starved by today's non-commercial posts under the API call cap.
+ const currentRevenue=current.filter(p=>p.meta?.role==='revenue');
+ const currentOther=current.filter(p=>p.meta?.role!=='revenue');
+ return [...currentRevenue,...historical,...currentOther]
+   .slice(0,Math.max(0,Math.min(12,maxPosts)));
 }
