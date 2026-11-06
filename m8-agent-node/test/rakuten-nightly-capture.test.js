@@ -44,3 +44,38 @@ test('failed attempt is not retried and disabled capture never opens Chrome',asy
   assert.ok(!state.includes('unsafe private'));
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('daily capture records bounded page-versus-export evidence without private metrics',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-rakuten-date-evidence-'));
+ try{
+  const now=Date.parse('2026-11-06T13:40:00Z');
+  const capture=async()=>({
+   status:'downloaded_csv_needs_valid_dates',
+   visibleDays:{visibleDateRowCount:6,hasDatedRows:true},
+   imported:[],rawText:'SECRET REWARD',schema:{firstRowLabels:['SECRET']}
+  });
+  const result=await runRakutenNightlyCapture(dir,{now,capture});
+  assert.equal(result.status,'downloaded_csv_needs_valid_dates');
+  assert.equal(result.hasDatedRows,true);
+  assert.equal(result.visibleDateRowCount,6);
+  assert.equal(result.exportDateValidation,'invalid_date_values');
+  const state=JSON.parse(fs.readFileSync(path.join(dir,'rakuten-nightly-capture.json'),'utf8'));
+  assert.equal(state.lastVisibleDayRowCount,6);
+  assert.equal(state.lastHasDatedRows,true);
+  assert.equal(state.lastExportDateValidation,'invalid_date_values');
+  assert.ok(!JSON.stringify(state).includes('SECRET'));
+  assert.equal(result.noPosting,true);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('unbounded or unavailable page evidence remains unknown',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-rakuten-date-unknown-'));
+ try{
+  const now=Date.parse('2026-11-06T13:40:00Z');
+  const capture=async()=>({status:'downloaded_csv_needs_mapping',
+    visibleDays:{visibleDateRowCount:999999,hasDatedRows:true}});
+  const x=await runRakutenNightlyCapture(dir,{now,capture});
+  assert.equal(x.visibleDateRowCount,'unknown');
+  assert.equal(x.hasDatedRows,'unknown');
+  assert.equal(x.exportDateValidation,'unknown');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
