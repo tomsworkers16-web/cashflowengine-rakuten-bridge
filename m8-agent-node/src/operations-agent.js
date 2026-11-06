@@ -9,6 +9,7 @@ import { decideRevenueActions } from './nightly-schedule.js';
 import { diagnoseFirstCommission } from './first-commission-funnel.js';
 import { runRakutenNightlyCapture } from './rakuten-nightly-capture.js';
 import { summarizeRevenueCopyVariants } from './revenue-copy-experiment.js';
+import { selectPostsForInsights } from './post-insights-selection.js';
 import { summarizeRecentAffiliateEvidence } from './rolling-revenue-evidence.js';
 
 const root = path.resolve(process.cwd());
@@ -100,7 +101,7 @@ async function getAccountInsights(day) {
 
 async function getPostInsights(posts) {
   const out = [];
-  for (const p of posts.slice(-5)) {
+  for (const p of posts) {
     if (!p?.id) continue;
     try {
       const data = await fetchThreads(`/${p.id}/insights`, { metric: 'views,likes,replies,reposts,quotes,shares' });
@@ -133,7 +134,12 @@ async function buildNightReport(day = dayKey()) {
   const replyFailed = replies.filter(x => x.status === 'failed');
   const errors = events.filter(x => /ERROR|REAUTH|FAILED/.test(String(x.type || '')));
   const accountInsights = await getAccountInsights(day);
-  const postInsights = await getPostInsights(posts);
+  const insightLookback = new Date(Date.parse(day+'T00:00:00+09:00') + JST - 6*86400000).toISOString().slice(0,10);
+  const insightPosts = summarizePostJournal(readJsonl(postsFile).filter(x=>{
+    const rowDate=rowDay(x);
+    return rowDate>=insightLookback && rowDate<=day;
+  })).published;
+  const postInsights = await getPostInsights(selectPostsForInsights(insightPosts,day));
   const apiRateLimited = events.some(e => e.type === 'RAKUTEN_PRODUCT_ERROR' && e.error === 'HTTP_429') ||
     eventCount(events, 'RAKUTEN_RATE_LIMIT_COOLDOWN') > 0;
   const status = !state.browserOk || replyFailed.length > 0 || postSummary.uncertainAttempts > 0 ||

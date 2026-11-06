@@ -47,3 +47,11 @@ test('historical report views accumulate across days and an API error cannot era
  assert.equal(result.variants.find(x=>x.variant==='compare_before_buy').totalViews,400);
  assert.equal(result.automatedWinnerSelection,false);
 });
+
+test('older snapshot cannot lower refreshed lifetime views for a post',()=>{
+ const rows=[post('100','spec_check')];
+ const result=summarizeRevenueCopyVariants(rows,[
+  insight('100',300),insight('100',11),{id:'100',metrics:{views:'unknown'}}
+ ]);
+ assert.equal(result.variants[0].totalViews,300);
+});
