@@ -19,6 +19,33 @@ function Health-Ok {
   }
   return $false
 }
+# Avoid restarting the core near scheduled Threads posting slots.
+function Test-PostingWindow {
+  $slots = @('07:30','12:30','19:30')
+  $envFile = Join-Path $root '.env'
+  if (Test-Path $envFile) {
+    $line = Get-Content -LiteralPath $envFile -Encoding UTF8 | Where-Object { $_.StartsWith('CFE_POST_SLOTS=') } | Select-Object -Last 1
+    if ($line) {
+      $raw = [string]$line
+      $slots = $raw.Substring('CFE_POST_SLOTS='.Length).Trim().Trim('"').Trim("'").Split(',')
+    }
+  }
+  try {
+    $jst = [TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, [TimeZoneInfo]::FindSystemTimeZoneById('Tokyo Standard Time'))
+  } catch { return $true }
+  $minuteNow = $jst.Hour * 60 + $jst.Minute
+  foreach ($slot in $slots) {
+    $parts = $slot.Trim().Split(':')
+    if ($parts.Count -ne 2) { continue }
+    $hour = 0; $minute = 0
+    if (-not [int]::TryParse($parts[0], [ref]$hour)) { continue }
+    if (-not [int]::TryParse($parts[1], [ref]$minute)) { continue }
+    if ($hour -lt 0 -or $hour -gt 23 -or $minute -lt 0 -or $minute -gt 59) { continue }
+    $target = $hour * 60 + $minute
+    if ($minuteNow -ge ($target - 20) -and $minuteNow -le ($target + 30)) { return $true }
+  }
+  return $false
+}
 function Stop-LocalCore {
   Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 1
@@ -70,6 +97,7 @@ try {
     exit 0
   }
 
+  if (Test-PostingWindow) { Log 'skip=posting_window_defer_core_restart'; exit 0 }
   $stage = Join-Path $env:TEMP ('cfe-m8-update-stage-' + $PID)
   if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
   & $git worktree add --detach $stage origin/main --quiet
