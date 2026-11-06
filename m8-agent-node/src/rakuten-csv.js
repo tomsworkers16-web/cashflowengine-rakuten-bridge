@@ -44,7 +44,13 @@ function nonnegative(x,label){
   const raw=String(x??'').trim().normalize('NFKC').replace(/[¥￥,，\s]/g,'');
   if(raw==='' || raw==='-' || raw==='－')return null;
   if(!/^\d+(?:\.\d+)?$/.test(raw))throw Error('invalid_'+label+':'+String(x).slice(0,30));
-  const v=Number(raw);if(!Number.isFinite(v))throw Error('invalid_'+label);
+  const v=Number(raw);
+  if(!Number.isFinite(v))throw Error('invalid_'+label);
+  // Counts cannot be fractional and monetary fields represent yen.
+  // Reject silent rounding or unsafe integer precision in the ledger.
+  if(['clicks','orders','salesCount','rewardYen','salesAmountYen'].includes(label)
+    && (!Number.isSafeInteger(v)||v<0))
+    throw Error('invalid_'+label);
   return v;
 }
 // Rakuten's exported day report may include a free-form title (occasionally
