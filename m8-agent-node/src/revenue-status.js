@@ -6,6 +6,7 @@ import {summarizeRecentAffiliateEvidence} from './rolling-revenue-evidence.js';
 import {inspectRejectedRakutenCsv} from './rakuten-rejected-status.js';
 import {auditRakutenRejectedExports} from './rakuten-export-audit.js';
 import {summarizeLocalAffiliateExposure} from './local-affiliate-exposure.js';
+import {firstRevenuePriority} from './first-revenue-priority.js';
 
 const load=(filename)=>{
  try{return JSON.parse(fs.readFileSync(filename,'utf8'));}
@@ -65,6 +66,10 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
     rewardEvidenceStatus:evidence.rewardEvidenceStatus,
     firstReportedCommissionDay:evidence.firstReportedCommissionDay,
     confirmedNetProfitYen:evidence.confirmedNetProfitYen},
+  firstRevenuePriority:firstRevenuePriority({exposure,
+    sevenDay:{...evidence,provisionalOrConfirmedRewardYen:evidence.rakutenRewardYenReported,
+      rakutenClicks:evidence.rakutenClicksReported,rakutenSalesCount:evidence.rakutenSalesCountReported},
+    captureConsistency}),
   nextAction,attribution:'楽天の日別実績はThreads投稿別の収益を証明しません。'
  };
 }
