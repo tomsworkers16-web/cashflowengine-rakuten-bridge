@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanProductName, editorialText, revenueText, revenueCopyVariant, roleForSlot, validatePublicationText } from '../src/product-posting.js';
+import { cleanProductName, editorialText, productUseCase, revenueText, revenueCopyVariant, roleForSlot, validatePublicationText } from '../src/product-posting.js';
 
 test('affiliate posts include a clear disclosure and the full original link', () => {
   const url = 'https://affiliate.example.jp/product?item=shop%3A10002149&affiliateId=abc';
@@ -93,4 +93,32 @@ test('bracketed substantive product titles are preserved, marketing tags removed
  assert.equal(cleanProductName('【送料無料】 包丁スタンド'),'包丁スタンド');
  assert.equal(cleanProductName('【セール】商品\n名'),'商品 名');
  assert.equal(cleanProductName('【HUBATH 洗面台 ヘアーキャッチャー】'),'HUBATH 洗面台 ヘアーキャッチャー');
+});
+
+test('use-case lead highlights actual product need without claims or fake experience',()=>{
+ const item={
+  itemName:'【HUBATH 洗面台 ヘアーキャッチャー】 排水口 ゴミ受け',
+  price:1980,affiliateUrl:'https://hb.afl.rakuten.co.jp/hgc/example/?pc=product'
+ };
+ const hook=productUseCase(item);
+ assert.match(hook,/洗面台の排水口/);
+ const post=revenueText(item,'compare_before_buy');
+ assert.match(post,/髪の毛の掃除/);
+ assert.ok(post.endsWith(item.affiliateUrl));
+ assert.equal(validatePublicationText(post,{revenue:true,affiliateUrl:item.affiliateUrl}),null);
+ const editorial=editorialText(item);
+ assert.match(editorial,/洗面台の排水口/);
+ assert.doesNotMatch(post,/使ってみた|絶対|必ず|効果がある/);
+});
+test('unknown product and unrelated generic items receive no invented hook',()=>{
+ assert.equal(productUseCase({itemName:'陶器の花瓶'}),null);
+ assert.equal(productUseCase({itemName:'洗面台用タオル'}),null);
+ assert.ok(revenueText({itemName:'陶器の花瓶',price:1200,affiliateUrl:'https://example.com/item'}));
+});
+test('long affiliate URLs prefer link safety over context paragraphs',()=>{
+ const url='https://hb.afl.rakuten.co.jp/hgc/example/?pc='+'x'.repeat(375);
+ const post=revenueText({itemName:'収納ラック',price:2480,affiliateUrl:url});
+ assert.ok(post&&post.length<=500);
+ assert.ok(post.endsWith(url));
+ assert.equal(validatePublicationText(post,{affiliateUrl:url,revenue:true}),null);
 });
