@@ -10,7 +10,7 @@ test('refreshes current posts and recent affiliate posts, not old discovery post
   make('104','2026-10-31','revenue'),make('105','2026-10-30','revenue')
  ];
  const result=selectPostsForInsights(posts,'2026-11-06');
- assert.deepEqual(result.map(x=>x.id),['100','101','102','104']);
+ assert.deepEqual(result.map(x=>x.id),['101','102','104','100']);
 });
 test('deduplicates publication records, caps API requests, excludes unverified IDs',()=>{
  const posts=[];
@@ -23,4 +23,22 @@ test('deduplicates publication records, caps API requests, excludes unverified I
 });
 test('rejects invalid date',()=>{
  assert.throws(()=>selectPostsForInsights([],'yesterday'),/invalid_report_day/);
+});
+
+test('revenue posts remain sampled across seven days when daily editorial posts fill the API cap',()=>{
+ const posts=[];
+ for(let offset=0;offset<7;offset++){
+  const day=new Date(Date.parse('2026-11-07T00:00:00+09:00')
+    -offset*86400000+9*3600000).toISOString().slice(0,10);
+  posts.push(make(String(1000+offset),day,'revenue'));
+  if(offset===0){
+   posts.push(make('2001',day,'discovery'));
+   posts.push(make('2002',day,'comparison'));
+  }
+ }
+ const chosen=selectPostsForInsights(posts,'2026-11-07',{maxPosts:8});
+ assert.equal(chosen.length,8);
+ assert.equal(chosen.filter(p=>p.meta.role==='revenue').length,7);
+ assert.ok(chosen.some(p=>p.jstDate==='2026-11-01'&&p.meta.role==='revenue'));
+ assert.equal(chosen.filter(p=>p.meta.role!=='revenue').length,1);
 });
