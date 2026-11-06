@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {summarizeRecentAffiliateEvidence} from './rolling-revenue-evidence.js';
 import {inspectRejectedRakutenCsv} from './rakuten-rejected-status.js';
+import {auditRakutenRejectedExports} from './rakuten-export-audit.js';
 
 const load=(filename)=>{
  try{return JSON.parse(fs.readFileSync(filename,'utf8'));}
@@ -19,6 +20,7 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
  const core=load(path.join(root,'state.json'));
  const evidence=summarizeRecentAffiliateEvidence(ledger,day,7);
  const rejectedCsv=inspectRejectedRakutenCsv(root);
+ const exportAudit=auditRakutenRejectedExports(root);
  let nextAction='夜間自動取得と投稿の状態を継続確認する';
  if((!ledger||evidence.daysReported===0)&&rejectedCsv.latestStatus==='daily_date_value_invalid')
   nextAction='楽天CSVは取得済みですが、日付値が無効です。CSVを再取得する前に楽天の日別レポート画面とエクスポートを確認する';
@@ -43,6 +45,7 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
     lastCaptureResult:capture?.lastResult||'unknown',lastCaptureSuccessDay:capture?.lastSuccessDay||null},
   report:{lastEvaluationDay:night?.jstDate||null,status:night?.status||'unknown'},
   rejectedCsv,
+  exportAudit,
   sevenDay:{from:evidence.from,to:evidence.to,
     daysReported:evidence.daysReported,daysMissing:evidence.daysMissing,
     rakutenClicks:evidence.rakutenClicksReported,
