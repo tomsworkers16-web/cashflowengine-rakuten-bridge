@@ -197,7 +197,17 @@ async function buildNightReport(day = dayKey()) {
 
   report.revenueDecisions = decideRevenueActions(report);
   report.firstCommissionFunnel = diagnoseFirstCommission(report);
-  report.revenueCopyExperiment = summarizeRevenueCopyVariants(posts,postInsights);
+  // A single day normally has only one revenue post. Compare a rolling
+  // observation window rather than claiming an A/B result from one entry.
+  const cutoff = new Date(Date.now() + JST - 13 * 86400000).toISOString().slice(0,10);
+  const recentPublished = summarizePostJournal(readJsonl(postsFile).filter(x=>
+    typeof x?.jstDate === 'string' && x.jstDate >= cutoff && x.jstDate <= day
+  )).published;
+  const pastInsights = recentReports(14).flatMap(r=>Array.isArray(r?.threadsInsights?.posts)?
+    r.threadsInsights.posts:[]);
+  report.revenueCopyExperiment = summarizeRevenueCopyVariants(
+    recentPublished,[...pastInsights,...postInsights]
+  );
 
   writeJson(path.join(reportsDir, `${day}-night.json`), report);
   writeJson(path.join(dataDir, 'latest-night-evaluation.json'), report);
