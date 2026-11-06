@@ -7,7 +7,10 @@ export function summarizeRevenueCopyVariants(publishedPosts=[],postInsights=[]) 
  for(const insight of Array.isArray(postInsights)?postInsights:[]){
   if(!insight||typeof insight.id!=='string')continue;
   const views=insight.metrics?.views;
-  if(Number.isFinite(views)&&views>=0)viewsById.set(insight.id,views);
+  // Lifetime post views can grow after publication. Retain the highest
+  // observed value rather than allowing an older report to overwrite it.
+  if(Number.isFinite(views)&&views>=0)
+   viewsById.set(insight.id,Math.max(viewsById.get(insight.id)??0,views));
  }
  const groups=new Map();
  for(const p of Array.isArray(publishedPosts)?publishedPosts:[]){
