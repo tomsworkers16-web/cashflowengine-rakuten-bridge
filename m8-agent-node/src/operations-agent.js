@@ -9,6 +9,7 @@ import { decideRevenueActions } from './nightly-schedule.js';
 import { diagnoseFirstCommission } from './first-commission-funnel.js';
 import { runRakutenNightlyCapture } from './rakuten-nightly-capture.js';
 import { summarizeRevenueCopyVariants } from './revenue-copy-experiment.js';
+import { summarizeRecentAffiliateEvidence } from './rolling-revenue-evidence.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -197,6 +198,11 @@ async function buildNightReport(day = dayKey()) {
 
   report.revenueDecisions = decideRevenueActions(report);
   report.firstCommissionFunnel = diagnoseFirstCommission(report);
+  // Rakuten day-level CSV can lag behind the posting date. Preserve past
+  // observed commission even when today's report row is not yet available.
+  report.recentAffiliateEvidence = summarizeRecentAffiliateEvidence(
+    readJson(path.join(dataDir,'affiliate-results.json'),null),day,7
+  );
   // A single day normally has only one revenue post. Compare a rolling
   // observation window rather than claiming an A/B result from one entry.
   const cutoff = new Date(Date.now() + JST - 13 * 86400000).toISOString().slice(0,10);
