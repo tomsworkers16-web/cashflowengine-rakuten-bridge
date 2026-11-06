@@ -7,6 +7,7 @@ import { intakeRakutenDownloads } from './rakuten-download-intake.js';
 import { operationalAdvice } from './ops-policy.js';
 import { decideRevenueActions } from './nightly-schedule.js';
 import { diagnoseFirstCommission } from './first-commission-funnel.js';
+import { runRakutenNightlyCapture } from './rakuten-nightly-capture.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -115,6 +116,9 @@ async function buildNightReport(day = dayKey()) {
   const state = readJson(stateFile, {});
   const postJournal = readJsonl(postsFile).filter(x => withinDay(x, day));
   const postSummary = summarizePostJournal(postJournal);
+  const affiliateBrowserAutoCapture = await runRakutenNightlyCapture(dataDir,{
+    enabled:process.env.CFE_RAKUTEN_AUTO_REPORT_ENABLED!=='false'
+  });
   const affiliateCapture = intakeRakutenDownloads(dataDir,process.env.RAKUTEN_REPORT_DOWNLOAD_DIR);
   const affiliateImport = scanRakutenInbox(dataDir);
   const affiliateRecovery = recoverRakutenRejectedFiles(dataDir);
@@ -172,6 +176,7 @@ async function buildNightReport(day = dayKey()) {
       profit: affiliate.profitYen
     },
     affiliateResults: affiliate,
+    affiliateBrowserAutoCapture,
     affiliateCapture,
     affiliateImport,
     affiliateRecovery,
