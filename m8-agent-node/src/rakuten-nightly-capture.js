@@ -59,7 +59,7 @@ export async function runRakutenNightlyCapture(dataDir, {
   catch{result={status:'capture_exception'};}
   const status=String(result?.status||'capture_exception');
   // No personal report values or page contents are exposed in state/summary.
-  const allowed=new Set(['validated_csv_captured_and_imported','downloaded_csv_needs_mapping',
+  const allowed=new Set(['validated_csv_captured_and_imported','downloaded_csv_needs_mapping','downloaded_csv_needs_valid_dates',
    'browser_preflight_blocked','login_or_unexpected_page','capture_failed',
    'csv_export_no_file','csv_saved_import_failed','csv_menu_link_unverified',
    'download_control_unverified','daily_tab_unverified','untrusted_csv_export_destination',

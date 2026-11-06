@@ -89,6 +89,12 @@ test('safe report diagnostics identify stage and errors without leaking private 
  assert.equal(diagnoseRakutenCaptureFailure(new Error('EACCES: permission denied'),'save_download_file').code,'local_file_access');
 });
 
+test('a CSV date column with placeholder text has a distinct safe diagnostic',()=>{
+ const result=diagnoseRakutenCaptureFailure(new Error('invalid_date_row_2: hidden account text'),'validate_downloaded_csv');
+ assert.deepEqual(result,{stage:'validate_downloaded_csv',code:'daily_report_date_values_invalid'});
+ assert.ok(!JSON.stringify(result).includes('hidden account'));
+});
+
 test('rejected CSV schema reveals only structural hints, not rows or earnings',()=>{
  const csv='日別,クリック合計,注文件数,成果報酬\n2026/11/05,12345,2,500\n';
  const summary=summarizeRakutenCsvSchema(Buffer.from(csv,'utf8'));

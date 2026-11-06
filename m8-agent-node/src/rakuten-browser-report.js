@@ -203,6 +203,7 @@ export function diagnoseRakutenCaptureFailure(error, stage='unknown'){
  else if(/Timeout|exceeded|timed out/i.test(msg))code='timeout';
  else if(/Execution context was destroyed|Frame was detached|navigation/i.test(msg))code='page_navigation_race';
  else if(/Target page, context or browser has been closed/i.test(msg))code='browser_closed';
+ else if(/invalid_date_row/i.test(msg))code='daily_report_date_values_invalid';
  else if(/invalid_csv|date_column_missing|no_data_rows|no_supported_metrics|invalid_date_row|csv_column_count_mismatch|duplicate_day_in_csv|no_valid_daily_rows|invalid_clicks|invalid_orders|invalid_rewardYen/i.test(msg))
   code='downloaded_csv_format_not_supported';
  else if(/download_is_not_csv/i.test(msg))code='download_file_not_csv';
@@ -316,7 +317,8 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     fs.mkdirSync(quarantine,{recursive:true});
     const rejected='rejected-'+Date.now()+'-'+process.pid+'.csv';
     fs.writeFileSync(path.join(quarantine,rejected),bytes,{flag:'wx',mode:0o600});
-    return {mode,status:'downloaded_csv_needs_mapping',
+    return {mode,status:/invalid_date_row/i.test(String(error?.message||''))
+      ?'downloaded_csv_needs_valid_dates':'downloaded_csv_needs_mapping',
      diagnostic:diagnoseRakutenCaptureFailure(error,stage),
      schema:summarizeRakutenCsvSchema(bytes),
      localRejectedFile:rejected,
