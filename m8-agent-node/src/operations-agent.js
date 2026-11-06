@@ -8,6 +8,7 @@ import { operationalAdvice } from './ops-policy.js';
 import { decideRevenueActions } from './nightly-schedule.js';
 import { diagnoseFirstCommission } from './first-commission-funnel.js';
 import { runRakutenNightlyCapture } from './rakuten-nightly-capture.js';
+import { summarizeRevenueCopyVariants } from './revenue-copy-experiment.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -196,6 +197,7 @@ async function buildNightReport(day = dayKey()) {
 
   report.revenueDecisions = decideRevenueActions(report);
   report.firstCommissionFunnel = diagnoseFirstCommission(report);
+  report.revenueCopyExperiment = summarizeRevenueCopyVariants(posts,postInsights);
 
   writeJson(path.join(reportsDir, `${day}-night.json`), report);
   writeJson(path.join(dataDir, 'latest-night-evaluation.json'), report);
