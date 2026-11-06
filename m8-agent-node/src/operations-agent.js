@@ -6,6 +6,7 @@ import { scanRakutenInbox, recoverRakutenRejectedFiles } from './rakuten-report-
 import { intakeRakutenDownloads } from './rakuten-download-intake.js';
 import { operationalAdvice } from './ops-policy.js';
 import { decideRevenueActions } from './nightly-schedule.js';
+import { diagnoseFirstCommission } from './first-commission-funnel.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -189,6 +190,7 @@ async function buildNightReport(day = dayKey()) {
   };
 
   report.revenueDecisions = decideRevenueActions(report);
+  report.firstCommissionFunnel = diagnoseFirstCommission(report);
 
   writeJson(path.join(reportsDir, `${day}-night.json`), report);
   writeJson(path.join(dataDir, 'latest-night-evaluation.json'), report);
