@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {summarizeRecentAffiliateEvidence} from './rolling-revenue-evidence.js';
 import {inspectRejectedRakutenCsv} from './rakuten-rejected-status.js';
 import {auditRakutenRejectedExports} from './rakuten-export-audit.js';
+import {summarizeLocalAffiliateExposure} from './local-affiliate-exposure.js';
 
 const load=(filename)=>{
  try{return JSON.parse(fs.readFileSync(filename,'utf8'));}
@@ -21,6 +22,7 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
  const evidence=summarizeRecentAffiliateEvidence(ledger,day,7);
  const rejectedCsv=inspectRejectedRakutenCsv(root);
  const exportAudit=auditRakutenRejectedExports(root);
+ const exposure=summarizeLocalAffiliateExposure(root,day);
  const captureConsistency=capture?.lastHasDatedRows===true
   && capture?.lastExportDateValidation==='invalid_date_values'
    ?'ui_has_dates_but_export_has_invalid_dates'
@@ -54,6 +56,7 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
   report:{lastEvaluationDay:night?.jstDate||null,status:night?.status||'unknown'},
   rejectedCsv,
   exportAudit,
+  exposure,
   sevenDay:{from:evidence.from,to:evidence.to,
     daysReported:evidence.daysReported,daysMissing:evidence.daysMissing,
     rakutenClicks:evidence.rakutenClicksReported,
