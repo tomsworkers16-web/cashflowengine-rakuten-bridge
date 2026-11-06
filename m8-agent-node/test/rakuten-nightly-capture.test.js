@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {runRakutenNightlyCapture,rakutenAutoCaptureDay} from '../src/rakuten-nightly-capture.js';
+import {runRakutenNightlyCapture,rakutenAutoCaptureDay,shouldPauseInvalidDateExport} from '../src/rakuten-nightly-capture.js';
 
 test('once daily headless capture uses no posting and never repeats export',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-rakuten-night-'));
@@ -78,4 +78,30 @@ test('unbounded or unavailable page evidence remains unknown',async()=>{
   assert.equal(x.hasDatedRows,'unknown');
   assert.equal(x.exportDateValidation,'unknown');
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('known invalid-date export pauses two nights and retries after cooldown',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-rakuten-invalid-cooldown-'));
+ try{
+  const day1=Date.parse('2026-11-06T15:00:00Z');
+  let calls=0;
+  const capture=async()=>{calls++;return {status:'downloaded_csv_needs_valid_dates'};};
+  assert.equal((await runRakutenNightlyCapture(dir,{now:day1,capture})).status,'downloaded_csv_needs_valid_dates');
+  for(const offset of [1,2]){
+   const v=await runRakutenNightlyCapture(dir,{now:day1+offset*86400000,capture});
+   assert.equal(v.status,'paused_invalid_csv_dates');
+   assert.equal(v.noDownload,true);
+   assert.equal(v.noPosting,true);
+  }
+  assert.equal(calls,1);
+  const third=await runRakutenNightlyCapture(dir,{now:day1+3*86400000,capture});
+  assert.equal(third.status,'downloaded_csv_needs_valid_dates');
+  assert.equal(calls,2);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('success and unrelated capture errors do not activate date-error cooldown',()=>{
+ assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'validated_csv_captured_and_imported'},'2026-11-07'),false);
+ assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'capture_failed'},'2026-11-07'),false);
+ assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'downloaded_csv_needs_valid_dates'},'2026-11-07'),true);
+ assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'downloaded_csv_needs_valid_dates'},'2026-11-09'),false);
 });
