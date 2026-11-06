@@ -146,6 +146,25 @@ async function inspectPeriodFields(page){
   }))
  ));
 }
+// Summarize date-like first cells only. Never include amounts, page text or IDs.
+export function summarizeVisibleReportDayCells(values){
+ const dates=new Set();
+ for(const input of (Array.isArray(values)?values:[]).slice(0,120)){
+  const v=String(input||'').trim().normalize('NFKC');
+  if(/^(?:20\d{2}[-\/年])?\d{1,2}[-\/月]\d{1,2}日?$/.test(v))
+   dates.add(v);
+ }
+ return {visibleDateRowCount:dates.size,hasDatedRows:dates.size>0};
+}
+async function inspectVisibleDayRows(page){
+ try{
+  const dates=await readWhenSettled(page,()=>page.locator('table tbody tr,[role="row"]').evaluateAll(rows=>
+   rows.filter(row=>row.getClientRects().length>0).slice(0,120)
+     .map(row=>row.querySelector('td,[role="cell"]')?.textContent?.trim()||'')
+  ));
+  return {...summarizeVisibleReportDayCells(dates),inspection:'table_rows_only'};
+ }catch{return {visibleDateRowCount:'unknown',hasDatedRows:'unknown',inspection:'unavailable'};}
+}
 function assertCsv(bytes){
  assert(bytes.length>0&&bytes.length<=5*1024*1024,'invalid_csv_size');
  let text;
@@ -253,11 +272,19 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     noDownload:true,noPosting:true};
   stage='inspect_report_controls';
   const controls=await readControls(page);
-  if(mode==='inspect')
-   return {mode,status:'period_report_accessible',pageType:'report',tab:'期間別',
-    controls,fields:await inspectPeriodFields(page),
+  if(mode==='inspect'){
+   const daily=await clickUniqueNativeButton(page,'日別');
+   if(!daily.clicked)return {mode,status:'daily_tab_unverified',
+    diagnostic:daily,noDownload:true,noPosting:true};
+   await page.waitForTimeout(800);
+   const visibleDays=await inspectVisibleDayRows(page);
+   return {mode,status:'daily_report_inspected',pageType:'report',
+    tab:'期間別・日別',visibleDays,
+    // Do not return input field text or arbitrary DOM contents.
+    controlTags:controls.map(c=>c.tag).slice(0,20),
     noDownload:true,noPosting:true,
-    message:'期間別画面の操作部品を確認しました。CSVが1件だけ特定できたときのみ別コマンドで取得できます。'};
+    message:'日別画面の構造だけを読み取りました。CSV取得や投稿は行っていません。'};
+  }
   // Confirmed live UI: 期間別 -> 日別 -> ダウンロード -> CSV (link).
   // At most one click per control. No retries of download actions.
   stage='select_daily_report';
@@ -265,6 +292,7 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   if(!daily.clicked)return {mode,status:'daily_tab_unverified',
     diagnostic:daily,noDownload:true,noPosting:true};
   await page.waitForTimeout(800);
+  const visibleDays=await inspectVisibleDayRows(page);
   if(classifyRakutenReportPage(page.url())!=='report')
    return {mode,status:'report_navigation_changed',noDownload:true,noPosting:true};
   stage='locate_download_menu';
@@ -321,6 +349,7 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
       ?'downloaded_csv_needs_valid_dates':'downloaded_csv_needs_mapping',
      diagnostic:diagnoseRakutenCaptureFailure(error,stage),
      schema:summarizeRakutenCsvSchema(bytes),
+     visibleDays,
      localRejectedFile:rejected,
      message:'CSVは取得済みで、データは集計していません。列構造の確認が必要です。',
      noPosting:true,noImport:true};
@@ -333,7 +362,7 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     return {mode,status:'csv_saved_import_failed',...result,
      importErrors:imported.failures.map(x=>x.error),noPosting:true};
    return {mode,status:'validated_csv_captured_and_imported',...result,
-    imported:imported.imported,noPosting:true};
+    visibleDays,imported:imported.imported,noPosting:true};
   }finally{fs.rmSync(saved,{force:true});}
  }finally{await context.close();}
  }catch(error){
@@ -351,7 +380,7 @@ if(isMain){
  const interactive=process.argv.includes('--interactive');
  inspectOrCapture({mode,interactive})
   .then(result=>{console.log(JSON.stringify(result,null,2));
-    if(result.status!=='period_report_accessible'&&result.status!=='validated_csv_captured_and_imported')
+    if(result.status!=='daily_report_inspected'&&result.status!=='validated_csv_captured_and_imported')
       process.exitCode=2;})
   .catch(e=>{
    const reason=classifyChromeLaunchError(e);

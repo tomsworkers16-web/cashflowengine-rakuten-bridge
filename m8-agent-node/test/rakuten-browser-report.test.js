@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema,summarizeVisibleReportDayCells} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -107,4 +107,16 @@ test('rejected CSV schema reveals only structural hints, not rows or earnings',(
  const tab=summarizeRakutenCsvSchema(Buffer.from('日付\tクリック数\t成果報酬\n2026/11/05\t2\t50'));
  assert.equal(tab.delimiter,'tab');
  assert.equal(tab.firstRowColumns,3);
+});
+
+test('read-only report inspection counts only date-like first cells without showing finance fields',()=>{
+ const summary=summarizeVisibleReportDayCells([
+  '2026/11/01','2026/11/02','2026年11月3日','11/04',
+  '10,000円','account_name','2026/11/01','date'
+ ]);
+ assert.deepEqual(summary,{visibleDateRowCount:4,hasDatedRows:true});
+ assert.deepEqual(summarizeVisibleReportDayCells(['date','売上金額','0']),{
+  visibleDateRowCount:0,hasDatedRows:false
+ });
+ assert.ok(!JSON.stringify(summary).includes('account_name'));
 });
