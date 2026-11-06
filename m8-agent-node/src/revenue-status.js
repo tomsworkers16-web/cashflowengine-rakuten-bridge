@@ -44,6 +44,8 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
   nextAction='成果報酬の記録あり。確定状況と費用を確認する（暫定報酬を実利益扱いしない）';
  else if(evidence.rakutenClicksReported==='unknown')
   nextAction='楽天のクリック列が未取得です。成果レポートを確認する';
+ else if(evidence.rakutenClicksReported===0&& !evidence.metricCoverage.clicks.complete)
+  nextAction='報告済み日の楽天クリックは0件ですが、期間全体の実績が未取得です。欠落日の取得を優先する';
  else if(evidence.rakutenClicksReported===0)
   nextAction='楽天側でクリック未発生。商品とPR投稿の訴求・リンクを再検討する';
  else nextAction='楽天側のクリック実績あり。売上件数・報酬の反映と商品選定を検証する';
@@ -60,6 +62,7 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
   exposure,
   sevenDay:{from:evidence.from,to:evidence.to,
     daysReported:evidence.daysReported,daysMissing:evidence.daysMissing,
+    metricCoverage:evidence.metricCoverage,
     rakutenClicks:evidence.rakutenClicksReported,
     rakutenSalesCount:evidence.rakutenSalesCountReported,
     provisionalOrConfirmedRewardYen:evidence.rakutenRewardYenReported,
@@ -68,7 +71,9 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
     confirmedNetProfitYen:evidence.confirmedNetProfitYen},
   firstRevenuePriority:firstRevenuePriority({exposure,
     sevenDay:{...evidence,provisionalOrConfirmedRewardYen:evidence.rakutenRewardYenReported,
-      rakutenClicks:evidence.rakutenClicksReported,rakutenSalesCount:evidence.rakutenSalesCountReported},
+      rakutenClicks:evidence.rakutenClicksReported,rakutenSalesCount:evidence.rakutenSalesCountReported,
+      clicksCoverageComplete:evidence.metricCoverage.clicks.complete,
+      salesCoverageComplete:evidence.metricCoverage.salesCount.complete},
     captureConsistency}),
   nextAction,attribution:'楽天の日別実績はThreads投稿別の収益を証明しません。'
  };
