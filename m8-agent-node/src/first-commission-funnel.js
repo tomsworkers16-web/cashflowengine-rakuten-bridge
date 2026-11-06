@@ -41,7 +41,7 @@ export function diagnoseFirstCommission({affiliateResults,threadsInsights}={}){
   rakutenSalesCount:sales??'unknown',
   rakutenRewardYen:reward??'unknown',
   rewardStatus:a.rewardStatus||'unknown',
-  profitConfirmed:false,
+  profitConfirmed:confirmed && Number.isFinite(a.profitYen),
   attribution:'Rakuten日別クリック・売上はThreads投稿別の実績ではありません。流入元の断定はできません。'
  };
 }
