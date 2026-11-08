@@ -71,7 +71,7 @@ const TEMPLATES = {
 
 export function looksCorruptedJapanese(value) {
   const s=String(value||'');
-  return /\uFFFD|[縺繧譁蜿螟豁ｮ髪諱驛]/u.test(s) ||
+  return /\uFFFD|[縺繧譁蜿螟豁ｮ諱驛]/u.test(s) ||
     (/[譎鄒繝繧縺]/u.test(s) && !/[ぁ-んァ-ン]/u.test(s));
 }
 
