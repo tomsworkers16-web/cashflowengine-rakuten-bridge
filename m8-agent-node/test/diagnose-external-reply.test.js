@@ -38,3 +38,11 @@ test('draft diagnostic fills and clears without any submit',()=>{
  assert.match(code,/skipped_reply_recipient_not_visible/);
  assert.doesNotMatch(code,/submit\.click\(|getByRole\('button'/);
 });
+
+test('diagnostic records local send-control geometry without clicking send',()=>{
+ const code=fs.readFileSync(path.resolve('src/diagnose-external-reply.js'),'utf8');
+ assert.match(code,/sendCandidates:state\.sendCandidates/);
+ assert.match(code,/querySelectorAll\('\[role="button"\],button,\[tabindex\],svg'\)/);
+ assert.match(code,/getBoundingClientRect\(\)/);
+ assert.doesNotMatch(code,/submit\.click\(|\.press\('Enter'\)/);
+});

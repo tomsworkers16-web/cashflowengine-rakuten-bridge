@@ -41,15 +41,44 @@ async function snapshot(page,label){
     const dialogs=[...document.querySelectorAll('[role="dialog"]')].map(d=>({
       text:String(d.innerText||'').slice(0,150)
     }));
+    // Inspect only nearby interactive ancestors of the existing reply editor.
+    // Never click, submit, or inspect the full DOM markup.
+    const activeEditor=document.querySelector('[role="textbox"][contenteditable="true"]');
+    const sendCandidates=[];
+    if(activeEditor){
+      let ancestor=activeEditor;
+      for(let depth=0;ancestor&&depth<7;depth++,ancestor=ancestor.parentElement){
+        const rect=ancestor.getBoundingClientRect();
+        if(rect.width>0&&rect.height>0&&rect.height<400&&rect.width<1200){
+          const nodes=[...ancestor.querySelectorAll('[role="button"],button,[tabindex],svg')].slice(0,40);
+          for(const node of nodes){
+            const r=node.getBoundingClientRect();
+            if(r.width<8||r.height<8||r.width>180||r.height>180)continue;
+            const key=[Math.round(r.x),Math.round(r.y),Math.round(r.width),Math.round(r.height)].join(':');
+            if(sendCandidates.some(x=>x.rectKey===key))continue;
+            sendCandidates.push({
+              depth,tag:node.tagName,role:node.getAttribute('role'),
+              aria:node.getAttribute('aria-label'),
+              title:node.getAttribute('title'),testid:node.getAttribute('data-testid'),
+              tabIndex:node.getAttribute('tabindex'),
+              svgChildren:node.querySelectorAll('svg').length,
+              fill:node.getAttribute('fill'),
+              rectKey:key,
+              classHint:String(node.className?.baseVal??node.className??'').slice(0,80)
+            });
+          }
+        }
+      }
+    }
     return {title:document.title,url:location.href,
-      buttons,editors,dialogs,articles:document.querySelectorAll('article').length,
+      buttons,editors,dialogs,sendCandidates:sendCandidates.slice(0,45),articles:document.querySelectorAll('article').length,
       loginVisible:!!document.querySelector('input[type="password"]')};
   });
   const shot=path.join(outDir,label+'.png');
   await page.screenshot({path:shot,fullPage:false,timeout:15000});
   return {label,shot,documentTitle:state.title,url:state.url,
     buttons:summarizeButtons(state.buttons),editors:state.editors.slice(0,12),
-    dialogs:state.dialogs.slice(0,5),articleCount:state.articles,
+    dialogs:state.dialogs.slice(0,5),sendCandidates:state.sendCandidates||[],articleCount:state.articles,
     loginVisible:state.loginVisible};
 }
 async function main(){
