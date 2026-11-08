@@ -105,3 +105,20 @@ test('success and unrelated capture errors do not activate date-error cooldown',
  assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'downloaded_csv_needs_valid_dates'},'2026-11-07'),true);
  assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'downloaded_csv_needs_valid_dates'},'2026-11-09'),false);
 });
+
+test('successful UI fallback is source-labelled, not misreported as valid CSV',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-night-ui-fallback-'));
+ try{
+  const capture=async()=>({status:'ui_daily_fallback_imported',
+   visibleDays:{visibleDateRowCount:6,hasDatedRows:true}});
+  const result=await runRakutenNightlyCapture(dir,{
+   now:Date.parse('2026-11-09T14:45:00Z'),capture});
+  assert.equal(result.status,'ui_daily_fallback_imported');
+  assert.equal(result.imported,true);
+  assert.equal(result.importSource,'rakuten_ui_period_daily');
+  assert.equal(result.exportDateValidation,'unknown');
+  const state=JSON.parse(fs.readFileSync(path.join(dir,'rakuten-nightly-capture.json'),'utf8'));
+  assert.equal(state.lastResult,'ui_daily_fallback_imported');
+  assert.equal(state.lastSuccessDay,undefined);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
