@@ -30,6 +30,7 @@ export function chooseTestCandidates(snapshot,history=[],now=Date.now()){
   return snapshot.candidates
     .filter(c=>typeof c.url==='string' && /^https:\/\/www\.threads\.com\/@[A-Za-z0-9_.]+\/post\/[A-Za-z0-9_-]+$/.test(c.url))
     .filter(c=>!used.has(c.url)&&!looksCorruptedJapanese(c.text||''))
+    .filter(c=>!c.url.toLowerCase().startsWith('https://www.threads.com/@rakumitsu_select/'))
     .map(c=>({...c,evaluation:scoreCandidate(c,{ownUsername:own})}))
     .filter(c=>c.evaluation.eligible && c.evaluation.score>=45)
     .sort((a,b)=>b.evaluation.score-a.evaluation.score);
