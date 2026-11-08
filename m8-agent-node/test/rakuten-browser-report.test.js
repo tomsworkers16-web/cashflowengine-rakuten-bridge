@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema,summarizeVisibleReportDayCells} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema,summarizeVisibleReportDayCells,classifyExportLinkShape} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -119,4 +119,20 @@ test('read-only report inspection counts only date-like first cells without show
   visibleDateRowCount:0,hasDatedRows:false
  });
  assert.ok(!JSON.stringify(summary).includes('account_name'));
+});
+
+test('read-only inspection classifies CSV link shape without exposing signed URLs',()=>{
+ const urls=[
+  {visible:true,text:'CSV',href:'https://affiliate.rakuten.co.jp/report/?token=SECRET'},
+ ];
+ const result=classifyExportLinkShape(urls);
+ assert.deepEqual(result,{
+  csvLinkCount:1,exportLinkShape:'official_absolute_url',exportLinkTrusted:true
+ });
+ assert.ok(!JSON.stringify(result).includes('SECRET'));
+ assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'#'}]).exportLinkShape,'fragment_or_script');
+ assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'/report/export'}]).exportLinkShape,'relative_path');
+ assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'https://evil.example/report.csv'}]).exportLinkTrusted,false);
+ assert.equal(classifyExportLinkShape([]).exportLinkShape,'unverified');
+ assert.equal(classifyExportLinkShape([...urls,...urls]).csvLinkCount,2);
 });
