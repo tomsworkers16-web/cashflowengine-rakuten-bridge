@@ -124,3 +124,41 @@ test('night capture records safe monthly export metadata without original URL or
   assert.ok(state.includes('lastExportMonthMatches'));
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('successful UI fallback is source-labelled, not misreported as valid CSV',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-night-ui-fallback-'));
+ try{
+  const capture=async()=>({status:'ui_daily_fallback_imported',
+   visibleDays:{visibleDateRowCount:6,hasDatedRows:true}});
+  const result=await runRakutenNightlyCapture(dir,{
+   now:Date.parse('2026-11-09T14:45:00Z'),capture});
+  assert.equal(result.status,'ui_daily_fallback_imported');
+  assert.equal(result.imported,true);
+  assert.equal(result.importSource,'rakuten_ui_period_daily');
+  assert.equal(result.exportDateValidation,'unknown');
+  const state=JSON.parse(fs.readFileSync(path.join(dir,'rakuten-nightly-capture.json'),'utf8'));
+  assert.equal(state.lastResult,'ui_daily_fallback_imported');
+  assert.equal(state.lastSuccessDay,undefined);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('reuses verified authenticated UI for two nights, retries CSV on third',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-night-ui-cadence-'));
+ try{
+  const calls=[];
+  const capture=async args=>{
+   calls.push(args.mode);
+   return {status:'ui_daily_fallback_imported'};
+  };
+  const day1=Date.parse('2026-11-09T14:45:00Z');
+  for(let n=0;n<4;n++){
+   const x=await runRakutenNightlyCapture(dir,{
+    now:day1+n*86400000,capture});
+   assert.equal(x.status,'ui_daily_fallback_imported');
+   if(n===1||n===2)assert.equal(x.noDownload,true);
+  }
+  assert.deepEqual(calls,['download','ui_daily','ui_daily','download']);
+  const state=JSON.parse(fs.readFileSync(path.join(dir,'rakuten-nightly-capture.json'),'utf8'));
+  assert.equal(state.lastCsvAttemptDay,'2026-11-12');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
