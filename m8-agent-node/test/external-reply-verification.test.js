@@ -7,19 +7,23 @@ import {makeExternalReplyEngine, replyAppearsPublished, looksCorruptedJapanese} 
 
 const candidate={author:'@questioner',url:'https://www.threads.com/@questioner/post/mock-1',
   text:'掃除が面倒なのでおすすめの時短方法ありませんか？ いつも困っています。'};
-function mockPage({visible=false,clickFails=false}={}) {
+function mockPage({visible=false,clickFails=false,recipientConfirmed=true,submitDecision='safe',pageUrl=candidate.url,divReplyVisible=false}={}) {
   let submitted=0;
+  let currentReply='';
   const replyButton={count:async()=>1,click:async()=>{},first(){return this}};
   const submitButton={count:async()=>1,click:async()=>{
     submitted++;
     if(clickFails)throw Error('uncertain_click');
   },last(){return this},filter(){return this}};
-  const editor={count:async()=>1,click:async()=>{},fill:async()=>{},
+  const editor={count:async()=>1,click:async()=>{},fill:async(text)=>{currentReply=text},
     last(){return this}};
   return {
     get clicks(){return submitted},
-    goto:async()=>{},waitForTimeout:async()=>{},
+    goto:async()=>{},url:()=>pageUrl,waitForTimeout:async()=>{},
+    evaluate:async(fn,arg)=>typeof arg==='string'?recipientConfirmed:submitDecision,
     locator(selector){
+      if(selector==='[data-cfe-confirmed-reply-submit="1"]')return submitButton;
+      if(selector==='a[href]')return {evaluateAll:async()=>submitted&&divReplyVisible?[{author:'rakumitsu_select',text:currentReply,permalink:true}]:[]};
       if(selector==='article')return {
         evaluateAll:async()=>submitted&&visible?[{author:'rakumitsu_select',
           text:'わかります。掃除は「始めるまでの手間」が減るだけでもかなりラクになりますよね。',
@@ -97,6 +101,62 @@ test('correct author and permalink after reload can produce verified posted',asy
   };
   const result=await t.engine.run(p,[candidate]);
   assert.equal(result.posted,1);
+  assert.equal(t.rows().at(-1).verification,'own_permalink_visible_after_reload');
+ }finally{t.close()}
+});
+
+test('scoped reply submit never relies on generic Reply button',()=>{
+ const source=fs.readFileSync(new URL('../src/external-reply-engine.js',import.meta.url),'utf8');
+ assert.doesNotMatch(source,/getByRole\('button',\{name:\/返信/);
+ assert.match(source,/data-cfe-confirmed-reply-submit/);
+ assert.match(source,/target_url_changed_before_edit/);
+ assert.match(source,/target_url_changed_after_edit/);
+ assert.match(source,/reply_recipient_not_confirmed/);
+ assert.match(source,/draft_text_mismatch/);
+ assert.match(source,/inline_submit_not_unique/);
+});
+
+test('wrong recipient cannot submit a reply and is marked failed',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({recipientConfirmed:false});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,0);
+  assert.equal(p.clicks,0);
+  assert.equal(t.rows().at(-1).status,'failed');
+  assert.equal(t.rows().at(-1).error,'reply_recipient_not_confirmed');
+ }finally{t.close()}
+});
+test('ambiguous arrow cannot submit and never creates pending',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({submitDecision:'inline_submit_not_unique'});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,0);
+  assert.equal(p.clicks,0);
+  assert.equal(t.rows().at(-1).status,'failed');
+  assert.equal(t.rows().at(-1).error,'inline_submit_not_unique');
+ }finally{t.close()}
+});
+test('URL mismatch stops before typing or sending',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({pageUrl:'https://www.threads.com/@other/post/another'});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,0);
+  assert.equal(p.clicks,0);
+  assert.equal(t.rows().at(-1).status,'failed');
+  assert.equal(t.rows().at(-1).error,'target_url_changed_before_edit');
+ }finally{t.close()}
+});
+
+test('DIV-based Threads fallback can verify exact own permalink and reply text',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({divReplyVisible:true});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,1);
+  assert.equal(result.unverified,0);
   assert.equal(t.rows().at(-1).verification,'own_permalink_visible_after_reload');
  }finally{t.close()}
 });
