@@ -89,7 +89,8 @@ async function main(){
       // A throwaway draft is NEVER submitted. It is cleared in finally.
       // Validate that the visible reply-to label matches the target account.
       const targetUser=new URL(url).pathname.split('/')[1].toLowerCase();
-      const replyLabelMatches=await page.getByText(new RegExp(targetUser.slice(1).replace(/[.*+?^$\{\}()|[\]\\]/g,'\\    const composer=await snapshot(page,'after-open');')+'.*に返信')).count();
+      const recipientVisible=await page.locator('body').innerText();
+      const replyLabelMatches=recipientVisible.includes(targetUser.slice(1)+'に返信')?1:0;
       if(replyLabelMatches<1){
         draftStatus='skipped_reply_recipient_not_visible';
       }else{
