@@ -69,7 +69,6 @@ const TEMPLATES = {
   ]
 };
 
-
 export function looksCorruptedJapanese(value) {
   const s=String(value||'');
   return /\uFFFD|[縺繧譁蜿螟豁ｮ髪諱驛]/u.test(s) ||
@@ -92,7 +91,15 @@ export function buildReply(c) {
 
 function readJsonl(file) {
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file,'utf  async function readOwnReplyRows(page) {
+  return fs.readFileSync(file,'utf8').split(/\r?\n/).filter(Boolean).map(x=>{try{return JSON.parse(x)}catch{return null}}).filter(Boolean);
+}
+
+export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, minScore=45, enabled=false, event=()=>{} }) {
+  const logFile=path.join(dataDir,'external-replies.jsonl');
+  const dayKey=()=>new Date(Date.now()+9*60*60*1000).toISOString().slice(0,10);
+  const todays=()=>readJsonl(logFile).filter(x=>x.jstDate===dayKey() && x.status==='posted');
+
+  async function readOwnReplyRows(page) {
     // Only a reply authored by the authenticated account and linked to its
     // own post permalink can qualify. A toast or editor dismissal is not proof.
     return page.locator('article').evaluateAll((articles, own) => {
@@ -103,7 +110,7 @@ function readJsonl(file) {
           try {
             const u=new URL(a.href, location.href);
             return u.hostname==='www.threads.com'||u.hostname==='threads.com'
-              ? u.pathname.replace(/\\/$/,'').toLowerCase()==='/@'+own : false;
+              ? u.pathname.replace(/\/$/,'').toLowerCase()==='/@'+own : false;
           } catch { return false; }
         });
         if(!profile)continue;
@@ -114,7 +121,7 @@ function readJsonl(file) {
               && u.pathname.toLowerCase().startsWith('/@'+own+'/post/');
           }catch{return false;}
         });
-        if(link)out.push({author:own,text:(article.innerText||'').toLowerCase().replace(/\\s+/g,' ').trim(),
+        if(link)out.push({author:own,text:(article.innerText||'').toLowerCase().replace(/\s+/g,' ').trim(),
           permalink:true});
       }
       return out;
@@ -174,22 +181,12 @@ function readJsonl(file) {
       return {status:'unverified',reason:'reply_submit_or_verification_failed'};
     }
   }
-t box.count())) throw new Error('reply_editor_not_found');
-    await box.fill(replyText).catch(async()=>{ await box.click(); await page.keyboard.type(replyText,{delay:20}); });
-    await page.waitForTimeout(500);
-
-    const submit=page.getByRole('button',{name:/投稿|Post|返信|Reply/i}).filter({hasNotText:/キャンセル|Cancel/i}).last();
-    if (!(await submit.count())) throw new Error('reply_submit_not_found');
-    await submit.click();
-    await page.waitForTimeout(1800);
-  }
-
   async function run(page, candidates=[]) {
     if (!enabled) return { enabled:false, posted:0, considered:candidates.length };
     const history=readJsonl(logFile);
     const postedToday=history.filter(x=>x.jstDate===dayKey()&&x.status==='posted');
-    const attemptsToday=history.filter(x=>x.jstDate===dayKey()&&
-      ['posted','pending','unverified'].includes(x.status));
+    const attemptsToday=[...new Map(history.filter(x=>x.jstDate===dayKey()&&
+      ['posted','pending','unverified'].includes(x.status)).map(x=>[x.url,x])).values()];
     if(attemptsToday.length>=maxPerDay)
       return {enabled:true,posted:0,dailyCap:true,considered:candidates.length};
     const repliedUrls=new Set(history.map(x=>x.url));
@@ -201,7 +198,7 @@ t box.count())) throw new Error('reply_editor_not_found');
       .filter(c=>!repliedAuthors.has(norm(c.author).replace(/^@/,'')))
       .sort((a,b)=>b.evaluation.score-a.evaluation.score);
 
-    const write=(row)=>fs.appendFileSync(logFile,JSON.stringify(row)+'\\n','utf8');
+    const write=(row)=>fs.appendFileSync(logFile,JSON.stringify(row)+'\n','utf8');
     let posted=0,unverified=0;
     for(const c of ranked) {
       if(attemptsToday.length+posted+unverified>=maxPerDay)break;
