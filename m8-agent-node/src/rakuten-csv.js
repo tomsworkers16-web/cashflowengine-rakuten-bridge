@@ -43,7 +43,7 @@ function dateValue(x){
 function nonnegative(x,label){
   const raw=String(x??'').trim().normalize('NFKC').replace(/[¥￥,，\s]/g,'');
   if(raw==='' || raw==='-' || raw==='－')return null;
-  if(!/^\d+(?:\.\d+)?$/.test(raw))throw Error('invalid_'+label+':'+String(x).slice(0,30));
+  if(!/^\d+(?:\.\d+)?$/.test(raw))throw Error('invalid_'+label);
   const v=Number(raw);
   if(!Number.isFinite(v))throw Error('invalid_'+label);
   // Counts cannot be fractional and monetary fields represent yen.
