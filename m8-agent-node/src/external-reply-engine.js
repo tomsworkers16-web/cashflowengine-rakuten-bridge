@@ -128,11 +128,46 @@ export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, 
     },norm(ownUsername).replace(/^@/,''));
   }
 
+  async function readOwnReplyRowsFallback(page) {
+    // Threads currently uses DIV-based posts (no <article> elements).
+    // Require an exact own-post permalink within a bounded local container
+    // that also contains the reply text; never infer success from a toast.
+    return page.locator('a[href]').evaluateAll((anchors, own) => {
+      const results=[];
+      for(const anchor of anchors){
+        let pathname='';
+        try{
+          const u=new URL(anchor.href,location.href);
+          if(!['www.threads.com','threads.com'].includes(u.hostname))continue;
+          pathname=u.pathname.toLowerCase();
+        }catch{continue}
+        if(!pathname.startsWith('/@'+own+'/post/'))continue;
+        let node=anchor;
+        for(let depth=0;node&&depth<7;depth++,node=node.parentElement){
+          const content=(node.innerText||'').toLowerCase().replace(/\s+/g,' ').trim();
+          // Refuse a page-level ancestor that combines unrelated posts.
+          if(content.length>1500)break;
+          if(content.length>=20 && content.length>=(anchor.innerText||'').length+10){
+            results.push({author:own,text:content,permalink:true});
+            break;
+          }
+        }
+      }
+      return results;
+    },norm(ownUsername).replace(/^@/,''));
+  }
+
+  async function readVerifiedReplyRows(page) {
+    const articles=await readOwnReplyRows(page);
+    if(articles.length)return articles;
+    return readOwnReplyRowsFallback(page);
+  }
+
   async function verifiedReplyVisible(page, candidate, replyText) {
     for(let attempt=0;attempt<3;attempt++){
       await page.goto(candidate.url,{waitUntil:'domcontentloaded',timeout:60000});
       await page.waitForTimeout(1200);
-      const rows=await readOwnReplyRows(page);
+      const rows=await readVerifiedReplyRows(page);
       if(replyAppearsPublished(rows,ownUsername,replyText))return true;
     }
     return false;
@@ -146,7 +181,7 @@ export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, 
     await page.waitForTimeout(1800);
 
     // If a former attempt already exists, never publish another copy.
-    const existing=await readOwnReplyRows(page);
+    const existing=await readVerifiedReplyRows(page);
     if(replyAppearsPublished(existing,ownUsername,replyText))
       return {status:'unverified',reason:'matching_reply_already_visible_no_resubmit'};
 
