@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 import {parseRakutenDailyCsv,parseCsv} from './rakuten-csv.js';
 import {importRakutenReportFiles} from './rakuten-report-importer.js';
+import {parseRakutenVisibleDailyTables,importRakutenVisibleDailyRows} from './rakuten-ui-daily.js';
 import {inspectBrowserMemory,classifyChromeLaunchError} from './rakuten-browser-memory.js';
 
 const REPORT_URL='https://affiliate.rakuten.co.jp/report/';
@@ -228,6 +229,26 @@ async function inspectVisibleDayRows(page){
   return {...summarizeVisibleReportDayCells(dates),inspection:'table_rows_only'};
  }catch{return {visibleDateRowCount:'unknown',hasDatedRows:'unknown',inspection:'unavailable'};}
 }
+// Never log the raw page table. Only an exact Rakuten day-table schema may
+// feed the provisional fallback ledger after a failed official CSV validation.
+async function fallbackVisibleDaily(page,dataDir){
+ try{
+  const url=new URL(page.url());
+  if(classifyRakutenReportPage(url.href)!=='report')return {status:'untrusted_report_page'};
+  const month=url.searchParams.get('kpi_date');
+  const tables=await readWhenSettled(page,()=>page.locator('table').evaluateAll(elements=>
+   elements.filter(t=>t.getClientRects().length>0).slice(0,20).map(table=>
+    Array.from(table.querySelectorAll('tr')).slice(0,45).map(row=>
+     Array.from(row.querySelectorAll('th,td')).map(cell=>
+      (cell.innerText||cell.textContent||'').trim())
+    )
+   )
+  ));
+  const rows=parseRakutenVisibleDailyTables(tables,{reportMonth:month});
+  const imported=importRakutenVisibleDailyRows(dataDir,rows);
+  return {status:'validated_daily_ui_imported',...imported};
+ }catch{return {status:'ui_daily_unverified'};}
+}
 function assertCsv(bytes){
  assert(bytes.length>0&&bytes.length<=5*1024*1024,'invalid_csv_size');
  let text;
@@ -297,7 +318,7 @@ export function diagnoseRakutenCaptureFailure(error, stage='unknown'){
 async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env.CFE_DATA_DIR||'.data'),
   downloadDir=process.env.RAKUTEN_REPORT_DOWNLOAD_DIR||path.resolve(process.cwd(),'.data/rakuten-browser-exports'),
   interactive=false}={}){
- assert(mode==='inspect'||mode==='download','unknown_mode');
+ assert(['inspect','download','ui_daily'].includes(mode),'unknown_mode');
  const memory=inspectBrowserMemory();
  if(!memory.allowed)return {mode,status:'browser_preflight_blocked',
   memory,noDownload:true,noPosting:true,
@@ -360,6 +381,12 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   const visibleDays=await inspectVisibleDayRows(page);
   if(classifyRakutenReportPage(page.url())!=='report')
    return {mode,status:'report_navigation_changed',noDownload:true,noPosting:true};
+  if(mode==='ui_daily'){
+   const uiFallback=await fallbackVisibleDaily(page,dataDir);
+   return {mode,status:uiFallback.status==='validated_daily_ui_imported'
+    ?'ui_daily_fallback_imported':'ui_daily_unverified',
+    visibleDays,uiFallback,noDownload:true,noPosting:true};
+  }
   stage='locate_download_menu';
   const downloadButtons=await periodTabCandidates(page);
   const matches=exactButtonIndices(downloadButtons,'ダウンロード');
@@ -411,14 +438,20 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     fs.mkdirSync(quarantine,{recursive:true});
     const rejected='rejected-'+Date.now()+'-'+process.pid+'.csv';
     fs.writeFileSync(path.join(quarantine,rejected),bytes,{flag:'wx',mode:0o600});
-    return {mode,status:/invalid_date_row/i.test(String(error?.message||''))
-      ?'downloaded_csv_needs_valid_dates':'downloaded_csv_needs_mapping',
+    const invalidDates=/invalid_date_row/i.test(String(error?.message||''));
+    const uiFallback=invalidDates
+     ?await fallbackVisibleDaily(page,dataDir):{status:'not_attempted'};
+    return {mode,status:uiFallback.status==='validated_daily_ui_imported'
+      ?'ui_daily_fallback_imported'
+      :invalidDates?'downloaded_csv_needs_valid_dates':'downloaded_csv_needs_mapping',
      diagnostic:diagnoseRakutenCaptureFailure(error,stage),
      schema:summarizeRakutenCsvSchema(bytes),
-     visibleDays,exportTarget,
+     visibleDays,exportTarget,uiFallback,
      localRejectedFile:rejected,
-     message:'CSVは取得済みで、データは集計していません。列構造の確認が必要です。',
-     noPosting:true,noImport:true};
+     message:uiFallback.status==='validated_daily_ui_imported'
+      ?'CSVの日付は不正ですが、楽天画面の日別行を検証して暫定記録しました。'
+      :'CSVは取得済みですが、日付データを検証できず集計していません。',
+     noPosting:true,noImport:uiFallback.status!=='validated_daily_ui_imported'};
    }
    // Explicit download was requested; import only this validated CSV now.
    // Keep the original saved CSV for inspection/re-import if actual headers differ.
@@ -444,11 +477,13 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
 export {inspectOrCapture};
 const isMain=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
 if(isMain){
- const mode=process.argv.includes('--download')?'download':'inspect';
+ const mode=process.argv.includes('--ui-daily')?'ui_daily'
+  :process.argv.includes('--download')?'download':'inspect';
  const interactive=process.argv.includes('--interactive');
  inspectOrCapture({mode,interactive})
   .then(result=>{console.log(JSON.stringify(result,null,2));
-    if(result.status!=='daily_report_inspected'&&result.status!=='validated_csv_captured_and_imported')
+    if(!['daily_report_inspected','validated_csv_captured_and_imported',
+      'ui_daily_fallback_imported'].includes(result.status))
       process.exitCode=2;})
   .catch(e=>{
    const reason=classifyChromeLaunchError(e);

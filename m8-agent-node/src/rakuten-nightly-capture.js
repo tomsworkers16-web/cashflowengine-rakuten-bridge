@@ -67,13 +67,24 @@ export async function runRakutenNightlyCapture(dataDir, {
     fs.renameSync(tmp,statePath);
    }finally{fs.rmSync(tmp,{force:true});}
   };
+  // Once a strictly verified UI fallback works, avoid downloading the same
+  // malformed CSV on the next two nights. Retry official CSV every third day.
+  const csvDay=String(state.lastCsvAttemptDay||'');
+  const sinceCsv=/^\d{4}-\d{2}-\d{2}$/.test(csvDay)
+   ?(Date.parse(day+'T00:00:00+09:00')-Date.parse(csvDay+'T00:00:00+09:00'))/86400000
+   :Infinity;
+  const uiOnly=state.lastResult==='ui_daily_fallback_imported'
+   &&Number.isInteger(sinceCsv)&&sinceCsv>0&&sinceCsv<3;
   write({...state,lastAttemptDay:day,lastResult:'in_progress'});
   let result;
-  try{result=await capture({mode:'download',interactive:false,dataDir:root});}
+  try{result=await capture({mode:uiOnly?'ui_daily':'download',
+    interactive:false,dataDir:root});}
   catch{result={status:'capture_exception'};}
+
   const status=String(result?.status||'capture_exception');
   // No personal report values or page contents are exposed in state/summary.
-  const allowed=new Set(['validated_csv_captured_and_imported','downloaded_csv_needs_mapping','downloaded_csv_needs_valid_dates',
+  const allowed=new Set(['validated_csv_captured_and_imported','ui_daily_fallback_imported',
+   'ui_daily_unverified','downloaded_csv_needs_mapping','downloaded_csv_needs_valid_dates',
    'browser_preflight_blocked','login_or_unexpected_page','capture_failed',
    'csv_export_no_file','csv_saved_import_failed','csv_menu_link_unverified',
    'download_control_unverified','daily_tab_unverified','untrusted_csv_export_destination',
@@ -96,16 +107,19 @@ export async function runRakutenNightlyCapture(dataDir, {
     ?true:result?.exportTarget?.reportMonthMatches===false?false:'unknown';
   const exportFormatCsv=result?.exportTarget?.csvFormatSpecified===true;
   write({...state,lastAttemptDay:day,lastResult:sanitized,
+   lastCsvAttemptDay:uiOnly?state.lastCsvAttemptDay:day,
    lastVisibleDayRowCount:visibleDateRowCount,lastHasDatedRows:hasDatedRows,
    lastExportDateValidation:exportDateValidation,
    lastExportEndpoint:exportEndpoint,
    lastExportMonthMatches:exportMonthMatches,
    lastExportFormatCsv:exportFormatCsv,
    ...(sanitized==='validated_csv_captured_and_imported'?{lastSuccessDay:day}:{})});
-  return {status:sanitized,jstDay:day,noPosting:true,interactive:false,
+  return {status:sanitized,jstDay:day,noPosting:true,noDownload:uiOnly,interactive:false,
    visibleDateRowCount,hasDatedRows,exportDateValidation,
    exportEndpoint,exportMonthMatches,exportFormatCsv,
-   imported:sanitized==='validated_csv_captured_and_imported'};
+   imported:['validated_csv_captured_and_imported','ui_daily_fallback_imported'].includes(sanitized),
+   importSource:sanitized==='ui_daily_fallback_imported'?'rakuten_ui_period_daily'
+     :sanitized==='validated_csv_captured_and_imported'?'rakuten_csv_period_daily':'unknown'};
  }finally{
   try{fs.closeSync(fd);}catch{}
   fs.rmSync(lockPath,{force:true});
