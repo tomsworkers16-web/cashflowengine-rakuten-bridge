@@ -71,7 +71,7 @@ const TEMPLATES = {
 
 export function looksCorruptedJapanese(value) {
   const s=String(value||'');
-  return /\uFFFD|[縺繧譁蜿螟豁ｮ髪諱驛]/u.test(s) ||
+  return /\uFFFD|[縺繧譁蜿螟豁ｮ諱驛]/u.test(s) ||
     (/[譎鄒繝繧縺]/u.test(s) && !/[ぁ-んァ-ン]/u.test(s));
 }
 
@@ -94,7 +94,7 @@ function readJsonl(file) {
   return fs.readFileSync(file,'utf8').split(/\r?\n/).filter(Boolean).map(x=>{try{return JSON.parse(x)}catch{return null}}).filter(Boolean);
 }
 
-export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, minScore=45, enabled=false, event=()=>{} }) {
+export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, minScore=45, enabled=false, replyOverride=null, event=()=>{} }) {
   const logFile=path.join(dataDir,'external-replies.jsonl');
   const dayKey=()=>new Date(Date.now()+9*60*60*1000).toISOString().slice(0,10);
   const todays=()=>readJsonl(logFile).filter(x=>x.jstDate===dayKey() && x.status==='posted');
@@ -202,7 +202,7 @@ export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, 
     let posted=0,unverified=0;
     for(const c of ranked) {
       if(attemptsToday.length+posted+unverified>=maxPerDay)break;
-      const replyText=buildReply(c);
+      const replyText=replyOverride===null ? buildReply(c) : replyOverride;
       let submitted=false;
       try {
         const result=await postReply(page,c,replyText,()=>{

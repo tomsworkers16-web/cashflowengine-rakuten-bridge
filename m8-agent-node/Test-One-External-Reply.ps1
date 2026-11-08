@@ -1,6 +1,7 @@
 param(
     [switch]$SendOne,
-    [string]$Url
+    [string]$Url,
+    [string]$ReplyText
 )
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
@@ -8,9 +9,19 @@ $taskName = 'CashFlowEngine-M8-LocalCore'
 $node = (Get-Command node.exe -ErrorAction Stop).Source
 $script = Join-Path $PSScriptRoot 'src\external-reply-one-shot.js'
 
+# Keep Japanese text out of command-line arguments passed to Node.
+$replyArgs = @()
+if ($PSBoundParameters.ContainsKey('ReplyText')) {
+    if ([string]::IsNullOrWhiteSpace($ReplyText)) { throw 'ReplyText must not be empty.' }
+    $replyPath = Join-Path $PSScriptRoot '.data\external-reply-one-shot-custom.txt'
+    New-Item -ItemType Directory -Path (Split-Path $replyPath) -Force | Out-Null
+    [System.IO.File]::WriteAllText($replyPath, $ReplyText, (New-Object System.Text.UTF8Encoding($false)))
+    $replyArgs = @('--reply-file=' + $replyPath)
+}
+
 if (-not $SendOne) {
     # Read-only, never stops services or publishes a reply.
-    & $node '--env-file=.env' $script
+    & $node '--env-file=.env' $script @replyArgs $(if ($Url) { '--url=' + $Url })
     exit $LASTEXITCODE
 }
 
@@ -52,7 +63,7 @@ try {
         Where-Object { $_.CommandLine -and $_.CommandLine -like '*local-core-v2.js*' })
     if ($remain.Count -gt 0) { throw 'Local Core still running. Aborting test.' }
 
-    & $node '--env-file=.env' $script '--send-one' ("--url=" + $Url)
+    & $node '--env-file=.env' $script '--send-one' ("--url=" + $Url) @replyArgs
     $testExit = $LASTEXITCODE
 }
 finally {
