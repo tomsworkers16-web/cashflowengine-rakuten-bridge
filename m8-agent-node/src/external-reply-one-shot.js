@@ -10,6 +10,7 @@ const CANDIDATES=path.join(DATA_DIR,'external-reply-candidates.json');
 const LOG=path.join(DATA_DIR,'external-replies.jsonl');
 const SEND=process.argv.includes('--send-one');
 const requested=process.argv.find(x=>x.startsWith('--url='))?.slice(6);
+const replyFile=process.argv.find(x=>x.startsWith('--reply-file='))?.slice(13);
 const dayKey=()=>new Date(Date.now()+9*3600000).toISOString().slice(0,10);
 const output=x=>console.log(JSON.stringify(x,null,2));
 
@@ -47,14 +48,31 @@ async function localCoreRunning(){
   finally{clearTimeout(timeout)}
 }
 
+export function validateCustomReply(value){
+  if(typeof value!=='string') throw Error('reply_text_not_string');
+  const text=value.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').trim();
+  if(text.length<15||text.length>450) throw Error('reply_text_length_invalid');
+  if(looksCorruptedJapanese(text)) throw Error('reply_text_mojibake_detected');
+  if(/https?:\/\/|www\.|【PR|アフィリエイト|#PR/i.test(text)) throw Error('reply_text_promotional_link_forbidden');
+  if(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) throw Error('reply_text_control_characters');
+  return text;
+}
+function readCustomReply(){
+  if(!replyFile)return null;
+  const file=path.resolve(replyFile);
+  // The operator-created local file is read once before any browser action.
+  return validateCustomReply(fs.readFileSync(file,'utf8'));
+}
+
 async function main(){
+  const customReply=readCustomReply();
   const rows=readRows();
   const snapshot=JSON.parse(fs.readFileSync(CANDIDATES,'utf8'));
   const choices=chooseTestCandidates(snapshot,rows);
   if(!SEND){
     output({status:'preview_only',noPosting:true,candidateCount:choices.length,
       candidates:choices.slice(0,5).map(c=>({url:c.url,author:c.author,
-        score:c.evaluation.score,replyText:buildReply(c),
+        score:c.evaluation.score,replyText:customReply??buildReply(c),
         sourceText:String(c.text).slice(0,240)}))});
     return;
   }
@@ -84,7 +102,7 @@ async function main(){
     const page=context.pages()[0] || await context.newPage();
     if((await localCoreRunning()))throw Error('local_core_restarted_during_test');
     const engine=makeExternalReplyEngine({dataDir:DATA_DIR,ownUsername:'rakumitsu_select',
-      maxPerDay:1,minScore:45,enabled:true});
+      maxPerDay:1,minScore:45,enabled:true,replyOverride:customReply});
     const result=await engine.run(page,[candidate]);
     const updated=readRows().filter(x=>x.url===requested).at(-1);
     const verified=result.posted===1 && updated?.status==='posted' &&
