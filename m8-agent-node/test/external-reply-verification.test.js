@@ -7,7 +7,7 @@ import {makeExternalReplyEngine, replyAppearsPublished, looksCorruptedJapanese} 
 
 const candidate={author:'@questioner',url:'https://www.threads.com/@questioner/post/mock-1',
   text:'掃除が面倒なのでおすすめの時短方法ありませんか？ いつも困っています。'};
-function mockPage({visible=false,clickFails=false}={}) {
+function mockPage({visible=false,clickFails=false,recipientConfirmed=true,submitDecision='safe',pageUrl=candidate.url}={}) {
   let submitted=0;
   const replyButton={count:async()=>1,click:async()=>{},first(){return this}};
   const submitButton={count:async()=>1,click:async()=>{
@@ -18,8 +18,8 @@ function mockPage({visible=false,clickFails=false}={}) {
     last(){return this}};
   return {
     get clicks(){return submitted},
-    goto:async()=>{},url:()=>candidate.url,waitForTimeout:async()=>{},
-    evaluate:async(fn,arg)=>typeof arg==='string'?true:'safe',
+    goto:async()=>{},url:()=>pageUrl,waitForTimeout:async()=>{},
+    evaluate:async(fn,arg)=>typeof arg==='string'?recipientConfirmed:submitDecision,
     locator(selector){
       if(selector==='[data-cfe-confirmed-reply-submit="1"]')return submitButton;
       if(selector==='article')return {
@@ -112,4 +112,38 @@ test('scoped reply submit never relies on generic Reply button',()=>{
  assert.match(source,/reply_recipient_not_confirmed/);
  assert.match(source,/draft_text_mismatch/);
  assert.match(source,/inline_submit_not_unique/);
+});
+
+test('wrong recipient cannot submit a reply and is marked failed',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({recipientConfirmed:false});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,0);
+  assert.equal(p.clicks,0);
+  assert.equal(t.rows().at(-1).status,'failed');
+  assert.equal(t.rows().at(-1).error,'reply_recipient_not_confirmed');
+ }finally{t.close()}
+});
+test('ambiguous arrow cannot submit and never creates pending',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({submitDecision:'inline_submit_not_unique'});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,0);
+  assert.equal(p.clicks,0);
+  assert.equal(t.rows().at(-1).status,'failed');
+  assert.equal(t.rows().at(-1).error,'inline_submit_not_unique');
+ }finally{t.close()}
+});
+test('URL mismatch stops before typing or sending',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({pageUrl:'https://www.threads.com/@other/post/another'});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,0);
+  assert.equal(p.clicks,0);
+  assert.equal(t.rows().at(-1).status,'failed');
+  assert.equal(t.rows().at(-1).error,'target_url_changed_before_edit');
+ }finally{t.close()}
 });
