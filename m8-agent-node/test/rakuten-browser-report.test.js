@@ -18,6 +18,8 @@ test('CSV export is validated and source file name is never used as a path',()=>
   assert.equal(result.days,1);
   assert.equal(fs.readdirSync(dir).length,1);
   assert.match(result.filename,/^rakuten-period-/);
+  assert.equal(Object.hasOwn(result,'sourceFilename'),false);
+  assert.ok(!JSON.stringify(result).includes('secret.csv'));
   assert.throws(()=>captureValidatedCsv(dir,Buffer.from('email,pass\nx,y\n')),/date_column_missing/);
   assert.equal(fs.readdirSync(dir).length,1);
  }finally{fs.rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
