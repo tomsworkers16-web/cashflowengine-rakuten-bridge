@@ -120,3 +120,19 @@ test('read-only report inspection counts only date-like first cells without show
  });
  assert.ok(!JSON.stringify(summary).includes('account_name'));
 });
+
+test('read-only inspection classifies CSV link shape without exposing signed URLs',()=>{
+ const urls=[
+  {visible:true,text:'CSV',href:'https://affiliate.rakuten.co.jp/report/?token=SECRET'},
+ ];
+ const result=classifyExportLinkShape(urls);
+ assert.deepEqual(result,{
+  csvLinkCount:1,exportLinkShape:'official_absolute_url',exportLinkTrusted:true
+ });
+ assert.ok(!JSON.stringify(result).includes('SECRET'));
+ assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'#'}]).exportLinkShape,'fragment_or_script');
+ assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'/report/export'}]).exportLinkShape,'relative_path');
+ assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'https://evil.example/report.csv'}]).exportLinkTrusted,false);
+ assert.equal(classifyExportLinkShape([]).exportLinkShape,'unverified');
+ assert.equal(classifyExportLinkShape([...urls,...urls]).csvLinkCount,2);
+});
