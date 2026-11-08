@@ -8,29 +8,31 @@ import {makeExternalReplyEngine, replyAppearsPublished, looksCorruptedJapanese} 
 const candidate={author:'@questioner',url:'https://www.threads.com/@questioner/post/mock-1',
   text:'掃除が面倒なのでおすすめの時短方法ありませんか？ いつも困っています。'};
 function mockPage({visible=false,clickFails=false}={}) {
-  let clicked=0;
-  const button={count:async()=>1,click:async()=>{
-    clicked++;
+  let submitted=0;
+  const replyButton={count:async()=>1,click:async()=>{},first(){return this}};
+  const submitButton={count:async()=>1,click:async()=>{
+    submitted++;
     if(clickFails)throw Error('uncertain_click');
-  },first(){return this},last(){return this},filter(){return this},
-  fill:async()=>{},getByRole(){return this}};
-  const editor={...button,click:async()=>{},fill:async()=>{}};
+  },last(){return this},filter(){return this}};
+  const editor={count:async()=>1,click:async()=>{},fill:async()=>{},
+    last(){return this}};
   return {
-    get clicks(){return clicked},
+    get clicks(){return submitted},
     goto:async()=>{},waitForTimeout:async()=>{},
     locator(selector){
       if(selector==='article')return {
-        evaluateAll:async()=>clicked&&visible?[{author:'rakumitsu_select',
+        evaluateAll:async()=>submitted&&visible?[{author:'rakumitsu_select',
           text:'わかります。掃除は「始めるまでの手間」が減るだけでもかなりラクになりますよね。',
           permalink:true}]:[],
-        first:()=>({getByRole:()=>button})
+        first:()=>({getByRole:()=>replyButton})
       };
       return editor;
     },
-    getByRole(role){return role==='textbox'?editor:button},
+    getByRole(role){return role==='textbox'?editor:submitButton},
     keyboard:{type:async()=>{}}
   };
 }
+
 function openTest() {
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-reply-'));
  const engine=makeExternalReplyEngine({dataDir:dir,ownUsername:'rakumitsu_select',
