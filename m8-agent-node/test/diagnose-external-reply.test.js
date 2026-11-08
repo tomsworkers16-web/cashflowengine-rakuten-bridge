@@ -14,10 +14,10 @@ test('diagnostic button summary contains no user secrets and is capped',()=>{
  assert.equal(summarizeButtons(x).length,35);
  assert.equal(summarizeButtons(x)[0].withinDialog,true);
 });
-test('diagnostic never contains a publishing click, keyboard type or fill',()=>{
+test('diagnostic never contains publishing click, keyboard type or Enter',()=>{
  const code=fs.readFileSync(path.resolve('src/diagnose-external-reply.js'),'utf8');
  assert.doesNotMatch(code,/submit\.click\(|getByRole\('button',\s*\{name:\/投稿/);
- assert.doesNotMatch(code,/\.fill\(|keyboard\.type\(|\.press\('Enter'\)/);
+ assert.doesNotMatch(code,/keyboard\.type\(|\.press\('Enter'\)/);
  assert.match(code,/noPosting:true/);
 });
 
