@@ -70,8 +70,10 @@ async function main(){
   const snapshot=JSON.parse(fs.readFileSync(CANDIDATES,'utf8'));
   const choices=chooseTestCandidates(snapshot,rows);
   if(!SEND){
+    if(requested && !choices.some(c=>c.url===requested)) throw Error('url_must_match_an_eligible_preview_candidate');
+    const previewChoices=requested?choices.filter(c=>c.url===requested):choices.slice(0,5);
     output({status:'preview_only',noPosting:true,candidateCount:choices.length,
-      candidates:choices.slice(0,5).map(c=>({url:c.url,author:c.author,
+      candidates:previewChoices.map(c=>({url:c.url,author:c.author,
         score:c.evaluation.score,replyText:customReply??buildReply(c),
         sourceText:String(c.text).slice(0,240)}))});
     return;
