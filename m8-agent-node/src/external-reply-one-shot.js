@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 import {makeExternalReplyEngine, scoreCandidate, looksCorruptedJapanese, buildReply} from './external-reply-engine.js';
 
@@ -56,7 +57,7 @@ async function main(){
         sourceText:String(c.text).slice(0,240)}))});
     return;
   }
-  if(process.env.CFE_EXTERNAL_REPLY_ENABLED==='true')
+  if(String(process.env.CFE_EXTERNAL_REPLY_ENABLED||'false').toLowerCase()==='true')
     throw Error('automatic_external_replies_must_be_disabled');
   if(!requested || !choices.some(c=>c.url===requested))
     throw Error('url_must_match_an_eligible_preview_candidate');
@@ -96,7 +97,7 @@ async function main(){
   }
 }
 
-if(process.argv[1] && path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){
+if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   main().catch(e=>{
     console.error(JSON.stringify({status:'failed_safe',reason:String(e.message).slice(0,180),
       noAutomaticRetry:true}));
