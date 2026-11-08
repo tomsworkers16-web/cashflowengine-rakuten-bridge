@@ -146,12 +146,12 @@ export function classifyRakutenExportTarget(href,reportUrl=''){
    ?'period_daily_api':'other_official_path';
  result.csvFormatSpecified=target.searchParams.get('format')==='csv';
  const month=target.searchParams.get('date')||'';
- result.monthParameterValid=/^20\\d{2}-(0[1-9]|1[0-2])$/.test(month);
+ result.monthParameterValid=/^20\d{2}-(0[1-9]|1[0-2])$/.test(month);
  try{
   const report=new URL(reportUrl);
   if(report.protocol==='https:'&&report.hostname==='affiliate.rakuten.co.jp'){
    const reportMonth=report.searchParams.get('kpi_date');
-   if(result.monthParameterValid&&/^20\\d{2}-(0[1-9]|1[0-2])$/.test(reportMonth||''))
+   if(result.monthParameterValid&&/^20\d{2}-(0[1-9]|1[0-2])$/.test(reportMonth||''))
     result.reportMonthMatches=reportMonth===month;
   }
  }catch{}
