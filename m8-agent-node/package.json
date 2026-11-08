@@ -21,7 +21,8 @@
     "publish-one": "node --env-file=.env src/publish-one.js",
     "verify-post": "node --env-file=.env src/verify-official-post.js",
     "rakuten-report-inspect": "node --env-file=.env src/rakuten-browser-report.js --interactive",
-    "rakuten-report-download": "node --env-file=.env src/rakuten-browser-report.js --download --interactive"
+    "rakuten-report-download": "node --env-file=.env src/rakuten-browser-report.js --download --interactive",
+    "rakuten-ui-daily": "node --env-file=.env src/rakuten-browser-report.js --ui-daily --interactive"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
