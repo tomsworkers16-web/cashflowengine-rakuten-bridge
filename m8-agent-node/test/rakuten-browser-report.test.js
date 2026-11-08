@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema,summarizeVisibleReportDayCells} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema,summarizeVisibleReportDayCells,classifyExportLinkShape} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
