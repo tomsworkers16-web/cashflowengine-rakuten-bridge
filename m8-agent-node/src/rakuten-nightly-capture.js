@@ -81,9 +81,6 @@ export async function runRakutenNightlyCapture(dataDir, {
     interactive:false,dataDir:root});}
   catch{result={status:'capture_exception'};}
 
-  let result;
-  try{result=await capture({mode:'download',interactive:false,dataDir:root});}
-  catch{result={status:'capture_exception'};}
   const status=String(result?.status||'capture_exception');
   // No personal report values or page contents are exposed in state/summary.
   const allowed=new Set(['validated_csv_captured_and_imported','ui_daily_fallback_imported',
