@@ -83,9 +83,31 @@ async function main(){
     }
     const navigationChanged=page.url()!==url;
     const composer=await snapshot(page,'after-open');
+    let draftStatus='skipped_not_unique';
+    let draft=null;
+    if(editorCount===1 && !navigationChanged){
+      // A throwaway draft is NEVER submitted. It is cleared in finally.
+      // Validate that the visible reply-to label matches the target account.
+      const targetUser=new URL(url).pathname.split('/')[1].toLowerCase();
+      const replyLabelMatches=await page.getByText(new RegExp(targetUser.slice(1).replace(/[.*+?^$\{\}()|[\]\\]/g,'\\    const composer=await snapshot(page,'after-open');')+'.*に返信')).count();
+      if(replyLabelMatches<1){
+        draftStatus='skipped_reply_recipient_not_visible';
+      }else{
+        try{
+          await editor.fill('【送信しない診断用下書き】');
+          await page.waitForTimeout(800);
+          if(page.url()!==url)throw Error('target_url_changed_after_draft');
+          draft=await snapshot(page,'draft-not-sent');
+          draftStatus='draft_displayed_without_send';
+        }finally{
+          // Dispose of the draft before closing the temporary browser context.
+          if(page.url()===url)await editor.fill('').catch(()=>{});
+        }
+      }
+    }
     console.log(JSON.stringify({status:'diagnostic_complete',noPosting:true,
-      target:url,openerResult:openerResult,navigationChanged,before:initial,after:composer,
-      note:'Only the existing inline editor was clicked; no text entered and no submit clicked.'},null,2));
+      target:url,openerResult:openerResult,navigationChanged,draftStatus,before:initial,after:composer,draft,
+      note:'Temporary diagnostic text was never submitted; cleared before browser close.'},null,2));
   }finally{if(context)await context.close()}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
