@@ -122,3 +122,24 @@ test('successful UI fallback is source-labelled, not misreported as valid CSV',a
   assert.equal(state.lastSuccessDay,undefined);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('reuses verified authenticated UI for two nights, retries CSV on third',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-night-ui-cadence-'));
+ try{
+  const calls=[];
+  const capture=async args=>{
+   calls.push(args.mode);
+   return {status:'ui_daily_fallback_imported'};
+  };
+  const day1=Date.parse('2026-11-09T14:45:00Z');
+  for(let n=0;n<4;n++){
+   const x=await runRakutenNightlyCapture(dir,{
+    now:day1+n*86400000,capture});
+   assert.equal(x.status,'ui_daily_fallback_imported');
+   if(n===1||n===2)assert.equal(x.noDownload,true);
+  }
+  assert.deepEqual(calls,['download','ui_daily','ui_daily','download']);
+  const state=JSON.parse(fs.readFileSync(path.join(dir,'rakuten-nightly-capture.json'),'utf8'));
+  assert.equal(state.lastCsvAttemptDay,'2026-11-12');
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
