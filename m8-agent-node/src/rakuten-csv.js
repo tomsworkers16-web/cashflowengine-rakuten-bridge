@@ -132,8 +132,13 @@ export function mergeDailySnapshot(existing, incoming) {
   const records=Array.isArray(existing?.records)?existing.records:[];
   const updated=new Map(incoming.map(r=>[r.jstDate,r]));
   for(const row of records){
-    if(updated.has(row.jstDate)&&row.source!=='rakuten_csv_period_daily')
+    if(updated.has(row.jstDate)&&row.source!=='rakuten_csv_period_daily'
+      &&row.source!=='rakuten_ui_period_daily')
       throw Error('conflicting_non_csv_results_for_'+row.jstDate);
   }
-  return {records:[...records.filter(r=>!(r.source==='rakuten_csv_period_daily'&&updated.has(r.jstDate))),...incoming]};
+  // Valid official CSV supersedes provisional authenticated UI fallback
+  // for the same date; never double-count the two source snapshots.
+  return {records:[...records.filter(r=>!(
+   ['rakuten_csv_period_daily','rakuten_ui_period_daily'].includes(r.source)
+   &&updated.has(r.jstDate))),...incoming]};
 }
