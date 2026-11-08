@@ -150,25 +150,60 @@ export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, 
     if(replyAppearsPublished(existing,ownUsername,replyText))
       return {status:'unverified',reason:'matching_reply_already_visible_no_resubmit'};
 
-    const article=page.locator('article').first();
-    const replyButton=article.getByRole('button',{name:/返信|Reply/i}).first();
-    if(await replyButton.count())await replyButton.click();
-    else {
-      const generic=page.getByRole('button',{name:/返信|Reply/i}).first();
-      if(!(await generic.count()))throw Error('reply_button_not_found');
-      await generic.click();
-    }
-    await page.waitForTimeout(800);
-
-    let box=page.getByRole('textbox').last();
-    if(!(await box.count()))box=page.locator('[contenteditable="true"]').last();
-    if(!(await box.count()))throw Error('reply_editor_not_found');
-    await box.fill(replyText).catch(async()=>{await box.click();await page.keyboard.type(replyText,{delay:20});});
+    // Threads uses a pre-existing inline editor. Clicking a generic "Reply"
+    // icon can navigate to an unrelated comment, so never do that.
+    if(page.url()!==candidate.url)throw Error('target_url_changed_before_edit');
+    const editor=page.getByRole('textbox');
+    if(await editor.count()!==1)throw Error('inline_reply_editor_not_unique');
+    const author=String(candidate.author||'').replace(/^@/,'').toLowerCase();
+    const recipient=await page.evaluate((username)=>{
+      const labels=[document.body.innerText||''];
+      for(const el of document.querySelectorAll('[placeholder],[data-placeholder],[aria-label],[title]')){
+        for(const name of ['placeholder','data-placeholder','aria-label','title']){
+          const text=el.getAttribute(name);
+          if(text&&text.includes('に返信'))labels.push(text);
+        }
+      }
+      return labels.some(v=>v.toLowerCase().includes(username+'に返信'));
+    },author);
+    if(!recipient)throw Error('reply_recipient_not_confirmed');
+    await editor.fill(replyText);
     await page.waitForTimeout(500);
+    if(page.url()!==candidate.url)throw Error('target_url_changed_after_edit');
 
-    const submit=page.getByRole('button',{name:/投稿|Post|返信|Reply/i})
-      .filter({hasNotText:/キャンセル|Cancel/i}).last();
-    if(!(await submit.count()))throw Error('reply_submit_not_found');
+    // Identify the exact black arrow in the same composer as the editor.
+    // The measured UI contains <div role="button"><svg role="img"
+    // aria-label="返信">, not an HTML <button>. Never select an arbitrary
+    // Reply control elsewhere in the thread.
+    const decision=await page.evaluate(({expectedText,expectedUrl})=>{
+      if(location.href!==expectedUrl)return 'target_url_changed_before_submit';
+      const field=document.querySelector('[role="textbox"][contenteditable="true"]');
+      if(!field)return 'inline_reply_editor_missing';
+      const text=(field.innerText||field.textContent||'').trim().replace(/\s+/g,' ');
+      if(text!==expectedText.trim().replace(/\s+/g,' '))return 'draft_text_mismatch';
+      const fieldRect=field.getBoundingClientRect();
+      const matches=[];
+      for(let node=field.parentElement,depth=0;node&&depth<7;node=node.parentElement,depth++){
+        for(const element of node.querySelectorAll('[role="button"]')){
+          const svg=element.querySelector('svg[role="img"][aria-label="返信"]');
+          if(!svg)continue;
+          const r=element.getBoundingClientRect();
+          if(r.width<28||r.width>52||r.height<28||r.height>52)continue;
+          if(r.right<fieldRect.left||r.left>fieldRect.right+75)continue;
+          if(r.bottom<fieldRect.top-50||r.top>fieldRect.bottom+55)continue;
+          if(getComputedStyle(element).visibility==='hidden')continue;
+          if(!matches.includes(element))matches.push(element);
+        }
+        if(matches.length)break;
+      }
+      if(matches.length!==1)return 'inline_submit_not_unique';
+      matches[0].setAttribute('data-cfe-confirmed-reply-submit','1');
+      return 'safe';
+    },{expectedText:replyText,expectedUrl:candidate.url});
+    if(decision!=='safe')throw Error(decision);
+    const submit=page.locator('[data-cfe-confirmed-reply-submit="1"]');
+    if(await submit.count()!==1)throw Error('confirmed_submit_missing');
+    if(page.url()!==candidate.url)throw Error('target_url_changed_at_submit');
 
     // Journal the intent *before* the irreversible click, avoiding blind retry.
     beforeSubmit();
