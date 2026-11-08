@@ -18,8 +18,10 @@ function mockPage({visible=false,clickFails=false}={}) {
     last(){return this}};
   return {
     get clicks(){return submitted},
-    goto:async()=>{},waitForTimeout:async()=>{},
+    goto:async()=>{},url:()=>candidate.url,waitForTimeout:async()=>{},
+    evaluate:async(fn,arg)=>typeof arg==='string'?true:'safe',
     locator(selector){
+      if(selector==='[data-cfe-confirmed-reply-submit="1"]')return submitButton;
       if(selector==='article')return {
         evaluateAll:async()=>submitted&&visible?[{author:'rakumitsu_select',
           text:'わかります。掃除は「始めるまでの手間」が減るだけでもかなりラクになりますよね。',
@@ -99,4 +101,15 @@ test('correct author and permalink after reload can produce verified posted',asy
   assert.equal(result.posted,1);
   assert.equal(t.rows().at(-1).verification,'own_permalink_visible_after_reload');
  }finally{t.close()}
+});
+
+test('scoped reply submit never relies on generic Reply button',()=>{
+ const source=fs.readFileSync(new URL('../src/external-reply-engine.js',import.meta.url),'utf8');
+ assert.doesNotMatch(source,/getByRole\('button',\{name:\/返信/);
+ assert.match(source,/data-cfe-confirmed-reply-submit/);
+ assert.match(source,/target_url_changed_before_edit/);
+ assert.match(source,/target_url_changed_after_edit/);
+ assert.match(source,/reply_recipient_not_confirmed/);
+ assert.match(source,/draft_text_mismatch/);
+ assert.match(source,/inline_submit_not_unique/);
 });
