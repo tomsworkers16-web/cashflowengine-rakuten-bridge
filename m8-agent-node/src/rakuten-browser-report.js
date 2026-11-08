@@ -128,6 +128,40 @@ async function csvMenuLinkCandidates(page){
   href:a.getAttribute('href')||''
  }))));
 }
+// Non-sensitive export-link classification; do not return signed URLs,
+// hidden DOM fields, account data or arbitrary attributes.
+export function classifyExportLinkShape(links){
+ const candidates=Array.isArray(links)?links:[];
+ const csv=exactCsvLinkIndices(candidates);
+ if(csv.length!==1)return {csvLinkCount:csv.length,exportLinkShape:'unverified'};
+ const href=String(candidates[csv[0]].href||'');
+ let shape='unknown';
+ if(!href||href==='#'||href.startsWith('#'))shape='fragment_or_script';
+ else if(href.startsWith('/'))shape='relative_path';
+ else{
+  try{
+   const u=new URL(href,REPORT_URL);
+   shape=u.protocol==='https:'&&u.hostname==='affiliate.rakuten.co.jp'
+    ?'official_absolute_url':'other_origin';
+  }catch{shape='invalid_url';}
+ }
+ return {csvLinkCount:1,exportLinkShape:shape,
+  exportLinkTrusted:isSafeRakutenExportLink(href)};
+}
+async function inspectCsvExportControls(page){
+ try{
+  const buttons=await periodTabCandidates(page);
+  const matched=exactButtonIndices(buttons,'ダウンロード');
+  if(matched.length!==1)return {downloadButtonCount:matched.length,
+   csvLinkCount:0,exportLinkShape:'unverified',menuOpened:false};
+  const button=buttons[matched[0]];
+  await page.locator('button').nth(button.index).click({timeout:BROWSER_WAIT_MS});
+  const links=await csvMenuLinkCandidates(page);
+  return {...classifyExportLinkShape(links),downloadButtonCount:1,
+   menuOpened:true};
+ }catch{return {downloadButtonCount:'unknown',csvLinkCount:'unknown',
+  exportLinkShape:'unverified',menuOpened:false};}
+}
 export function isSafeRakutenExportLink(href){
  if(!href||href==='#'||href.startsWith('#'))return true;
  try{
@@ -278,12 +312,13 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
     diagnostic:daily,noDownload:true,noPosting:true};
    await page.waitForTimeout(800);
    const visibleDays=await inspectVisibleDayRows(page);
+   const exportControls=await inspectCsvExportControls(page);
    return {mode,status:'daily_report_inspected',pageType:'report',
-    tab:'期間別・日別',visibleDays,
+    tab:'期間別・日別',visibleDays,exportControls,
     // Do not return input field text or arbitrary DOM contents.
     controlTags:controls.map(c=>c.tag).slice(0,20),
     noDownload:true,noPosting:true,
-    message:'日別画面の構造だけを読み取りました。CSV取得や投稿は行っていません。'};
+    message:'日別画面とCSVリンクの構造を確認しました。CSV取得や投稿は行っていません。'};
   }
   // Confirmed live UI: 期間別 -> 日別 -> ダウンロード -> CSV (link).
   // At most one click per control. No retries of download actions.
