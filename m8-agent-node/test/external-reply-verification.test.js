@@ -7,14 +7,15 @@ import {makeExternalReplyEngine, replyAppearsPublished, looksCorruptedJapanese} 
 
 const candidate={author:'@questioner',url:'https://www.threads.com/@questioner/post/mock-1',
   text:'掃除が面倒なのでおすすめの時短方法ありませんか？ いつも困っています。'};
-function mockPage({visible=false,clickFails=false,recipientConfirmed=true,submitDecision='safe',pageUrl=candidate.url}={}) {
+function mockPage({visible=false,clickFails=false,recipientConfirmed=true,submitDecision='safe',pageUrl=candidate.url,divReplyVisible=false}={}) {
   let submitted=0;
+  let currentReply='';
   const replyButton={count:async()=>1,click:async()=>{},first(){return this}};
   const submitButton={count:async()=>1,click:async()=>{
     submitted++;
     if(clickFails)throw Error('uncertain_click');
   },last(){return this},filter(){return this}};
-  const editor={count:async()=>1,click:async()=>{},fill:async()=>{},
+  const editor={count:async()=>1,click:async()=>{},fill:async(text)=>{currentReply=text},
     last(){return this}};
   return {
     get clicks(){return submitted},
@@ -22,6 +23,7 @@ function mockPage({visible=false,clickFails=false,recipientConfirmed=true,submit
     evaluate:async(fn,arg)=>typeof arg==='string'?recipientConfirmed:submitDecision,
     locator(selector){
       if(selector==='[data-cfe-confirmed-reply-submit="1"]')return submitButton;
+      if(selector==='a[href]')return {evaluateAll:async()=>submitted&&divReplyVisible?[{author:'rakumitsu_select',text:currentReply,permalink:true}]:[]};
       if(selector==='article')return {
         evaluateAll:async()=>submitted&&visible?[{author:'rakumitsu_select',
           text:'わかります。掃除は「始めるまでの手間」が減るだけでもかなりラクになりますよね。',
@@ -145,5 +147,16 @@ test('URL mismatch stops before typing or sending',async()=>{
   assert.equal(p.clicks,0);
   assert.equal(t.rows().at(-1).status,'failed');
   assert.equal(t.rows().at(-1).error,'target_url_changed_before_edit');
+ }finally{t.close()}
+});
+
+test('DIV-based Threads fallback can verify exact own permalink and reply text',async()=>{
+ const t=openTest();
+ try{
+  const p=mockPage({divReplyVisible:true});
+  const result=await t.engine.run(p,[candidate]);
+  assert.equal(result.posted,1);
+  assert.equal(result.unverified,0);
+  assert.equal(t.rows().at(-1).verification,'own_permalink_visible_after_reload');
  }finally{t.close()}
 });
