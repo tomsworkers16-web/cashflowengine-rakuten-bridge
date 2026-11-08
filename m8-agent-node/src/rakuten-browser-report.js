@@ -289,7 +289,7 @@ export function diagnoseRakutenCaptureFailure(error, stage='unknown'){
 async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env.CFE_DATA_DIR||'.data'),
   downloadDir=process.env.RAKUTEN_REPORT_DOWNLOAD_DIR||path.resolve(process.cwd(),'.data/rakuten-browser-exports'),
   interactive=false}={}){
- assert(mode==='inspect'||mode==='download','unknown_mode');
+ assert(['inspect','download','ui_daily'].includes(mode),'unknown_mode');
  const memory=inspectBrowserMemory();
  if(!memory.allowed)return {mode,status:'browser_preflight_blocked',
   memory,noDownload:true,noPosting:true,
@@ -352,6 +352,12 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   const visibleDays=await inspectVisibleDayRows(page);
   if(classifyRakutenReportPage(page.url())!=='report')
    return {mode,status:'report_navigation_changed',noDownload:true,noPosting:true};
+  if(mode==='ui_daily'){
+   const uiFallback=await fallbackVisibleDaily(page,dataDir);
+   return {mode,status:uiFallback.status==='validated_daily_ui_imported'
+    ?'ui_daily_fallback_imported':'ui_daily_unverified',
+    visibleDays,uiFallback,noDownload:true,noPosting:true};
+  }
   stage='locate_download_menu';
   const downloadButtons=await periodTabCandidates(page);
   const matches=exactButtonIndices(downloadButtons,'ダウンロード');
