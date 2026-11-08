@@ -59,6 +59,8 @@ test('one-shot sends nothing without explicit exact URL',()=>{
 test('custom reply permits real Japanese and rejects corrupt or promotional text',()=>{
  const valid='掃除機を出すのが面倒ですよね。床のホコリだけをフロアワイパーで取る方法もあります。';
  assert.equal(validateCustomReply(valid),valid);
+ const natural='床に落ちた髪の毛をワイパーで取れば、掃除機の出番を減らしやすいですよ。';
+ assert.equal(validateCustomReply(natural),natural);
  assert.throws(()=>validateCustomReply('縺薙≧縺・≧の返信になります。'),/mojibake/);
  assert.throws(()=>validateCustomReply('短い'),/length_invalid/);
  assert.throws(()=>validateCustomReply('掃除の方法はこちらから https://example.com を見てね！'),/promotional_link/);
