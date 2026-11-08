@@ -447,11 +447,13 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
 export {inspectOrCapture};
 const isMain=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
 if(isMain){
- const mode=process.argv.includes('--download')?'download':'inspect';
+ const mode=process.argv.includes('--ui-daily')?'ui_daily'
+  :process.argv.includes('--download')?'download':'inspect';
  const interactive=process.argv.includes('--interactive');
  inspectOrCapture({mode,interactive})
   .then(result=>{console.log(JSON.stringify(result,null,2));
-    if(result.status!=='daily_report_inspected'&&result.status!=='validated_csv_captured_and_imported')
+    if(!['daily_report_inspected','validated_csv_captured_and_imported',
+      'ui_daily_fallback_imported'].includes(result.status))
       process.exitCode=2;})
   .catch(e=>{
    const reason=classifyChromeLaunchError(e);
