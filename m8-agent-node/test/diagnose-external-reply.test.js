@@ -29,3 +29,12 @@ test('diagnostic clicks only inline textbox, never reply icon or submit',()=>{
  assert.match(code,/navigationChanged/);
  assert.match(code,/target_url_changed_before_editor/);
 });
+
+test('draft diagnostic fills and clears without any submit',()=>{
+ const code=fs.readFileSync(path.resolve('src/diagnose-external-reply.js'),'utf8');
+ assert.match(code,/editor\.fill\('【送信しない診断用下書き】'\)/);
+ assert.match(code,/editor\.fill\(''\)/);
+ assert.match(code,/target_url_changed_after_draft/);
+ assert.match(code,/skipped_reply_recipient_not_visible/);
+ assert.doesNotMatch(code,/submit\.click\(|getByRole\('button'/);
+});
