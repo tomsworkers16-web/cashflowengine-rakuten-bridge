@@ -70,19 +70,22 @@ async function main(){
     await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
     await page.waitForTimeout(1800);
     const initial=await snapshot(page,'before-open');
-    // This clicks only a visible reply opener. It never clicks a submit button.
-    const openers=page.locator('article').first().getByRole('button',{name:/^返信$|^Reply$/i});
-    const opener=await openers.count()?openers.first():page.getByRole('button',{name:/^返信$|^Reply$/i}).first();
-    let openerResult='not_found';
-    if(await opener.count()){
-      await opener.click();
-      openerResult='clicked_reply_opener_only';
+    // In current Threads UI the inline reply editor is already visible.
+    // Click only that editor; never a reply icon under a different comment.
+    if(page.url()!==url)throw Error('target_url_changed_before_editor');
+    const editor=page.getByRole('textbox');
+    const editorCount=await editor.count();
+    let openerResult='editor_not_unique';
+    if(editorCount===1){
+      await editor.click();
+      openerResult='clicked_inline_reply_editor_only';
       await page.waitForTimeout(700);
     }
+    const navigationChanged=page.url()!==url;
     const composer=await snapshot(page,'after-open');
     console.log(JSON.stringify({status:'diagnostic_complete',noPosting:true,
-      target:url,openerResult:openerResult,before:initial,after:composer,
-      note:'Only reply opener clicked; no text entered and no submit clicked.'},null,2));
+      target:url,openerResult:openerResult,navigationChanged,before:initial,after:composer,
+      note:'Only the existing inline editor was clicked; no text entered and no submit clicked.'},null,2));
   }finally{if(context)await context.close()}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){

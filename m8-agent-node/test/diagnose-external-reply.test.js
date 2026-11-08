@@ -20,3 +20,12 @@ test('diagnostic never contains a publishing click, keyboard type or fill',()=>{
  assert.doesNotMatch(code,/\.fill\(|keyboard\.type\(|\.press\('Enter'\)/);
  assert.match(code,/noPosting:true/);
 });
+
+test('diagnostic clicks only inline textbox, never reply icon or submit',()=>{
+ const code=fs.readFileSync(path.resolve('src/diagnose-external-reply.js'),'utf8');
+ assert.match(code,/getByRole\('textbox'\)/);
+ assert.match(code,/editor\.click\(\)/);
+ assert.doesNotMatch(code,/getByRole\('button'/);
+ assert.match(code,/navigationChanged/);
+ assert.match(code,/target_url_changed_before_editor/);
+});
