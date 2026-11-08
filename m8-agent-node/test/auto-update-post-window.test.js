@@ -3,17 +3,24 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-test('M8 auto-update checks the JST posting window before a core restart',()=>{
- const script=fs.readFileSync(path.resolve('auto-update-agent.ps1'),'utf8');
- const start=script.indexOf('function Test-PostingWindow');
- const check=script.indexOf('if (Test-PostingWindow)');
- const stop=script.indexOf('  Stop-LocalCore\n  & $git merge --ff-only');
- assert.ok(start>=0);
- assert.ok(check>start);
- assert.ok(stop>check);
- assert.match(script,/Tokyo Standard Time/);
- assert.match(script,/posting_window_defer_core_restart/);
- assert.match(script,/CFE_POST_SLOTS=/);
- assert.match(script,/minuteNow -ge/);
- assert.match(script,/minuteNow -le/);
+function assertPostingWindowGuard(script) {
+ // Windows git checkouts may use CRLF, while the repository uses LF.
+ const normalized = script.replace(/\r\n/g, '\n');
+ const start = normalized.indexOf('function Test-PostingWindow');
+ const check = normalized.indexOf('if (Test-PostingWindow)');
+ const stop = normalized.indexOf('  Stop-LocalCore\n  & $git merge --ff-only');
+ assert.ok(start >= 0, 'posting window function must exist');
+ assert.ok(check > start, 'posting window must be checked after declaration');
+ assert.ok(stop > check, 'posting window must be checked before stopping the core');
+ assert.match(normalized, /Tokyo Standard Time/);
+ assert.match(normalized, /posting_window_defer_core_restart/);
+ assert.match(normalized, /CFE_POST_SLOTS=/);
+ assert.match(normalized, /minuteNow -ge/);
+ assert.match(normalized, /minuteNow -le/);
+}
+
+test('M8 auto-update checks the JST posting window before a core restart on LF and CRLF checkouts', () => {
+ const script = fs.readFileSync(path.resolve('auto-update-agent.ps1'), 'utf8');
+ assertPostingWindowGuard(script);
+ assertPostingWindowGuard(script.replace(/\r?\n/g, '\r\n'));
 });
