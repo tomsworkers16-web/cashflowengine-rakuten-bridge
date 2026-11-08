@@ -89,12 +89,22 @@ export async function runRakutenNightlyCapture(dataDir, {
   const exportDateValidation=sanitized==='downloaded_csv_needs_valid_dates'
     ?'invalid_date_values'
     :sanitized==='validated_csv_captured_and_imported'?'valid':'unknown';
+  const exportEndpoint=['period_monthly_api','period_daily_api','other_official_path','untrusted']
+    .includes(result?.exportTarget?.exportEndpoint)
+     ?result.exportTarget.exportEndpoint:'unknown';
+  const exportMonthMatches=result?.exportTarget?.reportMonthMatches===true
+    ?true:result?.exportTarget?.reportMonthMatches===false?false:'unknown';
+  const exportFormatCsv=result?.exportTarget?.csvFormatSpecified===true;
   write({...state,lastAttemptDay:day,lastResult:sanitized,
    lastVisibleDayRowCount:visibleDateRowCount,lastHasDatedRows:hasDatedRows,
    lastExportDateValidation:exportDateValidation,
+   lastExportEndpoint:exportEndpoint,
+   lastExportMonthMatches:exportMonthMatches,
+   lastExportFormatCsv:exportFormatCsv,
    ...(sanitized==='validated_csv_captured_and_imported'?{lastSuccessDay:day}:{})});
   return {status:sanitized,jstDay:day,noPosting:true,interactive:false,
    visibleDateRowCount,hasDatedRows,exportDateValidation,
+   exportEndpoint,exportMonthMatches,exportFormatCsv,
    imported:sanitized==='validated_csv_captured_and_imported'};
  }finally{
   try{fs.closeSync(fd);}catch{}

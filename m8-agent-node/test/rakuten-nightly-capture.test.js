@@ -105,3 +105,22 @@ test('success and unrelated capture errors do not activate date-error cooldown',
  assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'downloaded_csv_needs_valid_dates'},'2026-11-07'),true);
  assert.equal(shouldPauseInvalidDateExport({lastAttemptDay:'2026-11-06',lastResult:'downloaded_csv_needs_valid_dates'},'2026-11-09'),false);
 });
+
+test('night capture records safe monthly export metadata without original URL or token',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-export-month-'));
+ try{
+  const capture=async()=>({status:'downloaded_csv_needs_valid_dates',
+   exportTarget:{exportEndpoint:'period_monthly_api',reportMonthMatches:true,
+     csvFormatSpecified:true,url:'https://affiliate.rakuten.co.jp/?token=SECRET'},
+   visibleDays:{visibleDateRowCount:3}});
+  const result=await runRakutenNightlyCapture(dir,{
+   now:Date.parse('2026-11-09T14:45:00Z'),capture});
+  assert.equal(result.exportEndpoint,'period_monthly_api');
+  assert.equal(result.exportMonthMatches,true);
+  assert.equal(result.exportFormatCsv,true);
+  const state=fs.readFileSync(path.join(dir,'rakuten-nightly-capture.json'),'utf8');
+  assert.ok(!state.includes('SECRET'));
+  assert.ok(!state.includes('token='));
+  assert.ok(state.includes('lastExportMonthMatches'));
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

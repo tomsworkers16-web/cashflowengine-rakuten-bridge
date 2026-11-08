@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema,summarizeVisibleReportDayCells,classifyExportLinkShape} from '../src/rakuten-browser-report.js';
+import {classifyRakutenReportPage,captureValidatedCsv,isPeriodTabLabel,selectPeriodButtonIndices,isTransientNavigationError,exactButtonIndices,exactCsvLinkIndices,isSafeRakutenExportLink,diagnoseRakutenCaptureFailure,summarizeRakutenCsvSchema,summarizeVisibleReportDayCells,classifyExportLinkShape,classifyRakutenExportTarget} from '../src/rakuten-browser-report.js';
 test('Rakuten official page and auth allowlist is strict',()=>{
  assert.equal(classifyRakutenReportPage('https://affiliate.rakuten.co.jp/report/'),'report');
  assert.equal(classifyRakutenReportPage('https://login.account.rakuten.com/sso/authorize'),'authentication_or_navigation');
@@ -129,7 +129,9 @@ test('read-only inspection classifies CSV link shape without exposing signed URL
  ];
  const result=classifyExportLinkShape(urls);
  assert.deepEqual(result,{
-  csvLinkCount:1,exportLinkShape:'official_absolute_url',exportLinkTrusted:true
+  csvLinkCount:1,exportLinkShape:'official_absolute_url',exportLinkTrusted:true,
+  exportTarget:{exportEndpoint:'other_official_path',csvFormatSpecified:false,
+   monthParameterValid:false,reportMonthMatches:'unknown'}
  });
  assert.ok(!JSON.stringify(result).includes('SECRET'));
  assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'#'}]).exportLinkShape,'fragment_or_script');
@@ -137,4 +139,21 @@ test('read-only inspection classifies CSV link shape without exposing signed URL
  assert.equal(classifyExportLinkShape([{visible:true,text:'CSV',href:'https://evil.example/report.csv'}]).exportLinkTrusted,false);
  assert.equal(classifyExportLinkShape([]).exportLinkShape,'unverified');
  assert.equal(classifyExportLinkShape([...urls,...urls]).csvLinkCount,2);
+});
+
+test('Rakuten visible daily report uses legitimate monthly CSV export endpoint',()=>{
+ const href='https://affiliate.rakuten.co.jp/api/report/download/monthly?format=csv&date=2026-11&token=PRIVATE';
+ const report='https://affiliate.rakuten.co.jp/report/monthly?kpi_date=2026-11';
+ const result=classifyRakutenExportTarget(href,report);
+ assert.deepEqual(result,{exportEndpoint:'period_monthly_api',
+  csvFormatSpecified:true,monthParameterValid:true,reportMonthMatches:true});
+ assert.ok(!JSON.stringify(result).includes('PRIVATE'));
+ const mismatch=classifyRakutenExportTarget(href,
+  'https://affiliate.rakuten.co.jp/report/monthly?kpi_date=2026-10');
+ assert.equal(mismatch.reportMonthMatches,false);
+ const invalid=classifyRakutenExportTarget(
+  'https://affiliate.rakuten.co.jp/api/report/download/monthly?format=csv&date=date',
+  report);
+ assert.equal(invalid.monthParameterValid,false);
+ assert.equal(classifyRakutenExportTarget('https://evil.invalid/csv').exportEndpoint,'untrusted');
 });

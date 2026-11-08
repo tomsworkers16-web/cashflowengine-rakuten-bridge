@@ -130,10 +130,38 @@ async function csvMenuLinkCandidates(page){
 }
 // Non-sensitive export-link classification; do not return signed URLs,
 // hidden DOM fields, account data or arbitrary attributes.
-export function classifyExportLinkShape(links){
+// Rakuten's observed daily table exports through the /monthly CSV API.
+// The path name is not itself proof that the wrong report was downloaded.
+// Report only structural signals, never query values, account IDs or URLs.
+export function classifyRakutenExportTarget(href,reportUrl=''){
+ const result={exportEndpoint:'unknown',csvFormatSpecified:false,
+  monthParameterValid:false,reportMonthMatches:'unknown'};
+ if(!href||href==='#'||href.startsWith('#'))return result;
+ let target;
+ try{target=new URL(href,REPORT_URL);}catch{return result;}
+ if(target.protocol!=='https:'||target.hostname!=='affiliate.rakuten.co.jp')
+  return {...result,exportEndpoint:'untrusted'};
+ result.exportEndpoint=target.pathname==='/api/report/download/monthly'
+  ?'period_monthly_api':target.pathname==='/api/report/download/daily'
+   ?'period_daily_api':'other_official_path';
+ result.csvFormatSpecified=target.searchParams.get('format')==='csv';
+ const month=target.searchParams.get('date')||'';
+ result.monthParameterValid=/^20\d{2}-(0[1-9]|1[0-2])$/.test(month);
+ try{
+  const report=new URL(reportUrl);
+  if(report.protocol==='https:'&&report.hostname==='affiliate.rakuten.co.jp'){
+   const reportMonth=report.searchParams.get('kpi_date');
+   if(result.monthParameterValid&&/^20\d{2}-(0[1-9]|1[0-2])$/.test(reportMonth||''))
+    result.reportMonthMatches=reportMonth===month;
+  }
+ }catch{}
+ return result;
+}
+export function classifyExportLinkShape(links,reportUrl=''){
  const candidates=Array.isArray(links)?links:[];
  const csv=exactCsvLinkIndices(candidates);
- if(csv.length!==1)return {csvLinkCount:csv.length,exportLinkShape:'unverified'};
+ if(csv.length!==1)return {csvLinkCount:csv.length,exportLinkShape:'unverified',
+  exportTarget:classifyRakutenExportTarget('',reportUrl)};
  const href=String(candidates[csv[0]].href||'');
  let shape='unknown';
  if(!href||href==='#'||href.startsWith('#'))shape='fragment_or_script';
@@ -146,7 +174,8 @@ export function classifyExportLinkShape(links){
   }catch{shape='invalid_url';}
  }
  return {csvLinkCount:1,exportLinkShape:shape,
-  exportLinkTrusted:isSafeRakutenExportLink(href)};
+  exportLinkTrusted:isSafeRakutenExportLink(href),
+  exportTarget:classifyRakutenExportTarget(href,reportUrl)};
 }
 async function inspectCsvExportControls(page){
  try{
@@ -157,7 +186,7 @@ async function inspectCsvExportControls(page){
   const button=buttons[matched[0]];
   await page.locator('button').nth(button.index).click({timeout:BROWSER_WAIT_MS});
   const links=await csvMenuLinkCandidates(page);
-  return {...classifyExportLinkShape(links),downloadButtonCount:1,
+  return {...classifyExportLinkShape(links,page.url()),downloadButtonCount:1,
    menuOpened:true};
  }catch{return {downloadButtonCount:'unknown',csvLinkCount:'unknown',
   exportLinkShape:'unverified',menuOpened:false};}
@@ -352,6 +381,7 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
   if(csv.length!==1)return {mode,status:'csv_menu_link_unverified',
    matches:csv.length,controls:await readControls(page),noDownload:true,noPosting:true};
   const link=links[csv[0]];
+  const exportTarget=classifyRakutenExportTarget(link.href,page.url());
   if(!isSafeRakutenExportLink(link.href))
    return {mode,status:'untrusted_csv_export_destination',noDownload:true,noPosting:true};
   stage='click_csv_link';
@@ -385,7 +415,7 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
       ?'downloaded_csv_needs_valid_dates':'downloaded_csv_needs_mapping',
      diagnostic:diagnoseRakutenCaptureFailure(error,stage),
      schema:summarizeRakutenCsvSchema(bytes),
-     visibleDays,
+     visibleDays,exportTarget,
      localRejectedFile:rejected,
      message:'CSVは取得済みで、データは集計していません。列構造の確認が必要です。',
      noPosting:true,noImport:true};
@@ -400,7 +430,7 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
       diagnoseRakutenCaptureFailure(new Error(String(x.error||'')),'import_validated_csv').code),
      noPosting:true};
    return {mode,status:'validated_csv_captured_and_imported',...result,
-    visibleDays,imported:imported.imported,noPosting:true};
+    visibleDays,exportTarget,imported:imported.imported,noPosting:true};
   }finally{fs.rmSync(saved,{force:true});}
  }finally{await context.close();}
  }catch(error){
