@@ -1,6 +1,7 @@
 // Read-only diagnostic: NEVER clicks a publishing control.
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';
 
 const url=process.argv.find(a=>a.startsWith('--url='))?.slice(6);
@@ -84,7 +85,7 @@ async function main(){
       note:'Only reply opener clicked; no text entered and no submit clicked.'},null,2));
   }finally{if(context)await context.close()}
 }
-if(process.argv[1]&&path.resolve(process.argv[1])===path.resolve(new URL(import.meta.url).pathname)){
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   main().catch(e=>{
     console.error(JSON.stringify({status:'diagnostic_failed',noPosting:true,reason:e.message}));
     process.exitCode=1;
