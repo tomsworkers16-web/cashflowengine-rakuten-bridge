@@ -211,8 +211,9 @@ export function captureValidatedCsv(downloadDir,bytes,{filename='rakuten-report.
  const name='rakuten-period-'+new Date().toISOString().replace(/[:.]/g,'-')+'-'+process.pid+'.csv';
  const destination=path.join(downloadDir,name);
  fs.writeFileSync(destination,bytes,{flag:'wx'});
- return {filename:path.basename(destination),sourceFilename:String(filename).slice(0,90),
-  days:evidence.days};
+ // The browser-suggested filename can contain identifying details. Never
+ // return it to task logs or reporting JSON.
+ return {filename:path.basename(destination),days:evidence.days};
 }
 // Report safe, actionable diagnostics without exposing page contents, tokens or paths.
 export function diagnoseRakutenCaptureFailure(error, stage='unknown'){
@@ -360,7 +361,9 @@ async function inspectOrCapture({mode='inspect',dataDir=path.resolve(process.env
    const imported=importRakutenReportFiles(dataDir,[path.join(downloadDir,result.filename)]);
    if(imported.failures.length)
     return {mode,status:'csv_saved_import_failed',...result,
-     importErrors:imported.failures.map(x=>x.error),noPosting:true};
+     importErrors:imported.failures.map(x=>
+      diagnoseRakutenCaptureFailure(new Error(String(x.error||'')),'import_validated_csv').code),
+     noPosting:true};
    return {mode,status:'validated_csv_captured_and_imported',...result,
     visibleDays,imported:imported.imported,noPosting:true};
   }finally{fs.rmSync(saved,{force:true});}
