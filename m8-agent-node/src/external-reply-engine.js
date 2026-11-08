@@ -69,6 +69,21 @@ const TEMPLATES = {
   ]
 };
 
+
+export function looksCorruptedJapanese(value) {
+  const s=String(value||'');
+  return /\uFFFD|[縺繧譁蜿螟豁ｮ髪諱驛]/u.test(s) ||
+    (/[譎鄒繝繧縺]/u.test(s) && !/[ぁ-んァ-ン]/u.test(s));
+}
+
+export function replyAppearsPublished(rows, ownUsername, replyText) {
+  const own=norm(ownUsername).replace(/^@/,'');
+  const text=norm(replyText);
+  if(!own || !text)return false;
+  return Array.isArray(rows)&&rows.some(row=>
+    row.author===own && row.text.includes(text) && row.permalink);
+}
+
 export function buildReply(c) {
   const cat=category(c?.text);
   const list=TEMPLATES[cat] || TEMPLATES.general;
@@ -77,31 +92,89 @@ export function buildReply(c) {
 
 function readJsonl(file) {
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file,'utf8').split(/\r?\n/).filter(Boolean).map(x=>{try{return JSON.parse(x)}catch{return null}}).filter(Boolean);
-}
+  return fs.readFileSync(file,'utf  async function readOwnReplyRows(page) {
+    // Only a reply authored by the authenticated account and linked to its
+    // own post permalink can qualify. A toast or editor dismissal is not proof.
+    return page.locator('article').evaluateAll((articles, own) => {
+      const out=[];
+      for(const article of articles) {
+        const anchors=[...article.querySelectorAll('a[href]')];
+        const profile=anchors.some(a=>{
+          try {
+            const u=new URL(a.href, location.href);
+            return u.hostname==='www.threads.com'||u.hostname==='threads.com'
+              ? u.pathname.replace(/\\/$/,'').toLowerCase()==='/@'+own : false;
+          } catch { return false; }
+        });
+        if(!profile)continue;
+        const link=anchors.find(a=>{
+          try {
+            const u=new URL(a.href,location.href);
+            return (u.hostname==='threads.com'||u.hostname==='www.threads.com')
+              && u.pathname.toLowerCase().startsWith('/@'+own+'/post/');
+          }catch{return false;}
+        });
+        if(link)out.push({author:own,text:(article.innerText||'').toLowerCase().replace(/\\s+/g,' ').trim(),
+          permalink:true});
+      }
+      return out;
+    },norm(ownUsername).replace(/^@/,''));
+  }
 
-export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, minScore=45, enabled=false, event=()=>{} }) {
-  const logFile=path.join(dataDir,'external-replies.jsonl');
-  const dayKey=()=>new Date(Date.now()+9*60*60*1000).toISOString().slice(0,10);
-  const todays=()=>readJsonl(logFile).filter(x=>x.jstDate===dayKey() && x.status==='posted');
+  async function verifiedReplyVisible(page, candidate, replyText) {
+    for(let attempt=0;attempt<3;attempt++){
+      await page.goto(candidate.url,{waitUntil:'domcontentloaded',timeout:60000});
+      await page.waitForTimeout(1200);
+      const rows=await readOwnReplyRows(page);
+      if(replyAppearsPublished(rows,ownUsername,replyText))return true;
+    }
+    return false;
+  }
 
-  async function postReply(page, candidate, replyText) {
+  async function postReply(page, candidate, replyText, beforeSubmit) {
+    if(!norm(ownUsername))throw Error('own_username_missing');
+    if(looksCorruptedJapanese(candidate.text)||looksCorruptedJapanese(replyText))
+      throw Error('possible_mojibake_detected');
     await page.goto(candidate.url,{waitUntil:'domcontentloaded',timeout:60000});
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1800);
+
+    // If a former attempt already exists, never publish another copy.
+    const existing=await readOwnReplyRows(page);
+    if(replyAppearsPublished(existing,ownUsername,replyText))
+      return {status:'unverified',reason:'matching_reply_already_visible_no_resubmit'};
 
     const article=page.locator('article').first();
     const replyButton=article.getByRole('button',{name:/返信|Reply/i}).first();
-    if (await replyButton.count()) await replyButton.click();
+    if(await replyButton.count())await replyButton.click();
     else {
       const generic=page.getByRole('button',{name:/返信|Reply/i}).first();
-      if (!(await generic.count())) throw new Error('reply_button_not_found');
+      if(!(await generic.count()))throw Error('reply_button_not_found');
       await generic.click();
     }
     await page.waitForTimeout(800);
 
     let box=page.getByRole('textbox').last();
-    if (!(await box.count())) box=page.locator('[contenteditable="true"]').last();
-    if (!(await box.count())) throw new Error('reply_editor_not_found');
+    if(!(await box.count()))box=page.locator('[contenteditable="true"]').last();
+    if(!(await box.count()))throw Error('reply_editor_not_found');
+    await box.fill(replyText).catch(async()=>{await box.click();await page.keyboard.type(replyText,{delay:20});});
+    await page.waitForTimeout(500);
+
+    const submit=page.getByRole('button',{name:/投稿|Post|返信|Reply/i})
+      .filter({hasNotText:/キャンセル|Cancel/i}).last();
+    if(!(await submit.count()))throw Error('reply_submit_not_found');
+
+    // Journal the intent *before* the irreversible click, avoiding blind retry.
+    beforeSubmit();
+    try {
+      await submit.click();
+      await page.waitForTimeout(1800);
+      if(await verifiedReplyVisible(page,candidate,replyText))return {status:'posted'};
+      return {status:'unverified',reason:'reply_not_visible_after_submit'};
+    }catch {
+      return {status:'unverified',reason:'reply_submit_or_verification_failed'};
+    }
+  }
+t box.count())) throw new Error('reply_editor_not_found');
     await box.fill(replyText).catch(async()=>{ await box.click(); await page.keyboard.type(replyText,{delay:20}); });
     await page.waitForTimeout(500);
 
@@ -113,36 +186,62 @@ export function makeExternalReplyEngine({ dataDir, ownUsername='', maxPerDay=3, 
 
   async function run(page, candidates=[]) {
     if (!enabled) return { enabled:false, posted:0, considered:candidates.length };
-    const postedToday=todays();
-    if (postedToday.length >= maxPerDay) return { enabled:true, posted:0, dailyCap:true, considered:candidates.length };
-    const repliedUrls=new Set(readJsonl(logFile).map(x=>x.url));
-    const repliedAuthors=new Set(postedToday.map(x=>norm(x.author).replace(/^@/,'')));
+    const history=readJsonl(logFile);
+    const postedToday=history.filter(x=>x.jstDate===dayKey()&&x.status==='posted');
+    const attemptsToday=history.filter(x=>x.jstDate===dayKey()&&
+      ['posted','pending','unverified'].includes(x.status));
+    if(attemptsToday.length>=maxPerDay)
+      return {enabled:true,posted:0,dailyCap:true,considered:candidates.length};
+    const repliedUrls=new Set(history.map(x=>x.url));
+    const repliedAuthors=new Set(attemptsToday.map(x=>norm(x.author).replace(/^@/,'')));
     const ranked=candidates
-      .map(c=>({ ...c, evaluation:scoreCandidate(c,{ownUsername}) }))
-      .filter(c=>c.evaluation.eligible && c.evaluation.score>=minScore)
+      .map(c=>({...c,evaluation:scoreCandidate(c,{ownUsername})}))
+      .filter(c=>c.evaluation.eligible&&c.evaluation.score>=minScore)
       .filter(c=>!repliedUrls.has(c.url))
       .filter(c=>!repliedAuthors.has(norm(c.author).replace(/^@/,'')))
       .sort((a,b)=>b.evaluation.score-a.evaluation.score);
 
-    let posted=0;
-    for (const c of ranked) {
-      if (postedToday.length + posted >= maxPerDay) break;
+    const write=(row)=>fs.appendFileSync(logFile,JSON.stringify(row)+'\\n','utf8');
+    let posted=0,unverified=0;
+    for(const c of ranked) {
+      if(attemptsToday.length+posted+unverified>=maxPerDay)break;
       const replyText=buildReply(c);
+      let submitted=false;
       try {
-        await postReply(page,c,replyText);
-        const row={at:new Date().toISOString(),jstDate:dayKey(),status:'posted',author:c.author,url:c.url,sourceText:c.text.slice(0,600),replyText,score:c.evaluation.score,reasons:c.evaluation.reasons};
-        fs.appendFileSync(logFile,JSON.stringify(row)+'\n','utf8');
+        const result=await postReply(page,c,replyText,()=>{
+          submitted=true;
+          write({at:new Date().toISOString(),jstDate:dayKey(),status:'pending',
+            author:c.author,url:c.url,score:c.evaluation.score});
+        });
+        if(result.status!=='posted'){
+          write({at:new Date().toISOString(),jstDate:dayKey(),status:'unverified',
+            author:c.author,url:c.url,reason:result.reason||'not_confirmed'});
+          event('EXTERNAL_REPLY_UNVERIFIED',{url:c.url,reason:result.reason});
+          unverified++;
+          break;
+        }
+        write({at:new Date().toISOString(),jstDate:dayKey(),status:'posted',
+          author:c.author,url:c.url,sourceText:c.text.slice(0,600),
+          replyText,score:c.evaluation.score,reasons:c.evaluation.reasons,
+          verification:'own_permalink_visible_after_reload'});
         event('EXTERNAL_REPLY_POSTED',{author:c.author,url:c.url,score:c.evaluation.score});
         posted++;
-        await page.waitForTimeout(2500 + Math.floor(Math.random()*2500));
-      } catch(e) {
-        const row={at:new Date().toISOString(),jstDate:dayKey(),status:'failed',author:c.author,url:c.url,score:c.evaluation.score,error:e.message};
-        fs.appendFileSync(logFile,JSON.stringify(row)+'\n','utf8');
-        event('EXTERNAL_REPLY_ERROR',{url:c.url,error:e.message});
+        await page.waitForTimeout(2500+Math.floor(Math.random()*2500));
+      }catch(e){
+        // A click attempted before an exception can have succeeded. Never retry.
+        const status=submitted?'unverified':'failed';
+        write({at:new Date().toISOString(),jstDate:dayKey(),status,
+          author:c.author,url:c.url,score:c.evaluation.score,
+          error:submitted?'reply_outcome_unknown':String(e.message||'reply_error').slice(0,120)});
+        event(status==='unverified'?'EXTERNAL_REPLY_UNVERIFIED':'EXTERNAL_REPLY_ERROR',
+          {url:c.url,reason:status});
+        if(submitted)unverified++;
         break;
       }
     }
-    return { enabled:true, posted, considered:candidates.length, eligible:ranked.length, remaining:Math.max(0,maxPerDay-postedToday.length-posted) };
+    return {enabled:true,posted,unverified,considered:candidates.length,
+      eligible:ranked.length,remaining:Math.max(0,maxPerDay-attemptsToday.length-posted-unverified)};
+
   }
 
   return { run, scoreCandidate, buildReply };
