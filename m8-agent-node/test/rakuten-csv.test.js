@@ -104,3 +104,13 @@ test('rejects impossible fractional clicks, counts or yen instead of rounding re
  assert.equal(okay[0].clicks,1200);
  assert.equal(okay[0].rewardYen,160);
 });
+
+test('malformed numeric values cannot leak customer identifiers into importer diagnostics',()=>{
+ const secret='private-account-1234';
+ let caught;
+ try{parseRakutenDailyCsv('日付,クリック数,成果報酬\n2026/11/05,1,'+secret+'\n');}
+ catch(e){caught=e;}
+ assert.ok(caught);
+ assert.equal(caught.message,'invalid_rewardYen');
+ assert.ok(!caught.message.includes(secret));
+});
