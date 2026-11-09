@@ -24,7 +24,7 @@ export function editorialGuide(jstDate, slot='07:30'){
   if(!Number.isFinite(d))return null;
   // Independent of Rakuten inventory. Stable across retries, varied across days/slots.
   const slotOffset=String(slot).split(':').reduce((n,x)=>n+Number(x||0),0);
-  const index=(Math.floor(d/86400000)*2+slotOffset)%TOPICS.length;
+  const index=(Math.floor(d/86400000)+slotOffset)%TOPICS.length;
   const [title,body,question]=TOPICS[index];
   return [title+'｜ちょっと便利な暮らしのヒント',body,question].join('\n\n');
 }
