@@ -1,4 +1,4 @@
-// Once-daily headless Rakuten export. Runs only in the existing nightly
+// Once-daily headless Rakuten report capture. Runs only in the existing nightly
 // evaluation process; no window focus, posting, password entry or retries.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,16 +6,6 @@ import {inspectOrCapture} from './rakuten-browser-report.js';
 
 export function rakutenAutoCaptureDay(now=Date.now()){
  return new Date(now+9*3600000).toISOString().slice(0,10);
-}
-// Suppress the next two nightly exports after a known invalid date value,
-// then try again. This does not affect manual inspect or offline imports.
-export function shouldPauseInvalidDateExport(state,day,cooldownDays=2){
- if(state?.lastResult!=='downloaded_csv_needs_valid_dates')return false;
- const previous=String(state.lastAttemptDay||'');
- if(!/^\d{4}-\d{2}-\d{2}$/.test(previous))return false;
- const diff=(Date.parse(day+'T00:00:00+09:00')
-   -Date.parse(previous+'T00:00:00+09:00'))/86400000;
- return Number.isInteger(diff)&&diff>0&&diff<=cooldownDays;
 }
 export async function runRakutenNightlyCapture(dataDir, {
  now=Date.now(),enabled=true,capture=inspectOrCapture
@@ -54,10 +44,6 @@ export async function runRakutenNightlyCapture(dataDir, {
   if(state.lastAttemptDay===day)return {
    status:'already_attempted_today',jstDay:day,lastResult:state.lastResult||'unknown',noPosting:true
   };
-  if(shouldPauseInvalidDateExport(state,day))return {
-   status:'paused_invalid_csv_dates',jstDay:day,
-   lastResult:state.lastResult,noPosting:true,noDownload:true
-  };
   // Commit the attempt BEFORE entering Chrome. Never retry a clicked export
   // just because a scheduled task or Windows process was interrupted.
   const write=(value)=>{
@@ -67,15 +53,17 @@ export async function runRakutenNightlyCapture(dataDir, {
     fs.renameSync(tmp,statePath);
    }finally{fs.rmSync(tmp,{force:true});}
   };
-  // Once a strictly verified UI fallback works, avoid downloading the same
-  // malformed CSV on the next two nights. Retry official CSV every third day.
-  const csvDay=String(state.lastCsvAttemptDay||'');
-  const sinceCsv=/^\d{4}-\d{2}-\d{2}$/.test(csvDay)
-   ?(Date.parse(day+'T00:00:00+09:00')-Date.parse(csvDay+'T00:00:00+09:00'))/86400000
-   :Infinity;
-  const uiOnly=state.lastResult==='ui_daily_fallback_imported'
-   &&Number.isInteger(sinceCsv)&&sinceCsv>0&&sinceCsv<3;
-  write({...state,lastAttemptDay:day,lastResult:'in_progress'});
+  // Once a verified UI fallback succeeds OR the CSV date is known invalid,
+  // stop scheduling repeated CSV downloads. Use the daily UI instead.
+  // Existing validated CSV users remain on the current path unless a later
+  // invalid-date result switches them to UI.
+  const uiOnly=['ui_daily_fallback_imported','downloaded_csv_needs_valid_dates',
+    'ui_daily_unverified'].includes(state.lastResult)
+    || state.preferredCaptureMode==='ui_daily';
+  // Persist UI preference before browser work: process interruption must not
+  // accidentally restore automatic CSV retry on the following night.
+  write({...state,lastAttemptDay:day,lastResult:'in_progress',
+    preferredCaptureMode:uiOnly?'ui_daily':state.preferredCaptureMode});
   let result;
   try{result=await capture({mode:uiOnly?'ui_daily':'download',
     interactive:false,dataDir:root});}
@@ -107,6 +95,7 @@ export async function runRakutenNightlyCapture(dataDir, {
     ?true:result?.exportTarget?.reportMonthMatches===false?false:'unknown';
   const exportFormatCsv=result?.exportTarget?.csvFormatSpecified===true;
   write({...state,lastAttemptDay:day,lastResult:sanitized,
+   preferredCaptureMode:uiOnly||sanitized==='ui_daily_fallback_imported'||sanitized==='downloaded_csv_needs_valid_dates'?'ui_daily':state.preferredCaptureMode,
    lastCsvAttemptDay:uiOnly?state.lastCsvAttemptDay:day,
    lastVisibleDayRowCount:visibleDateRowCount,lastHasDatedRows:hasDatedRows,
    lastExportDateValidation:exportDateValidation,
