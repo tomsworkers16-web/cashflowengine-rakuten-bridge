@@ -9,6 +9,7 @@ import { isRakutenRateLimitError, rakutenCooldownRemaining } from './rakuten-rat
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
 import { roleForSlot, editorialText, revenueText, revenueCopyVariant, validatePublicationText } from './product-posting.js';
 import { keywordRelevanceBonus } from './product-relevance.js';
+import { EDITORIAL_POLICY_VERSION, editorialGuide, researchLane, researchSort, researchScore } from './editorial-strategy.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
 import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
 
@@ -164,14 +165,14 @@ function itemScore(i) {
   if (/^https?:\/\//.test(i.affiliateUrl)) s += 5;
   return s;
 }
-async function rakutenBest(keyword, excluded = new Set(), role = 'discovery') {
+async function rakutenBest(keyword, excluded = new Set(), role = 'discovery', lane = 'niche_proxy') {
   if (!RAKUTEN_APPLICATION_ID || !RAKUTEN_ACCESS_KEY || !RAKUTEN_AFFILIATE_ID) throw new Error('rakuten_credentials_missing');
-  const q = new URLSearchParams({ applicationId: RAKUTEN_APPLICATION_ID, accessKey: RAKUTEN_ACCESS_KEY, affiliateId: RAKUTEN_AFFILIATE_ID, keyword, format: 'json', hits: '20', sort: '-reviewCount', availability: '1', imageFlag: '1' });
+  const q = new URLSearchParams({ applicationId: RAKUTEN_APPLICATION_ID, accessKey: RAKUTEN_ACCESS_KEY, affiliateId: RAKUTEN_AFFILIATE_ID, keyword, format: 'json', hits: '30', sort: researchSort(lane), availability: '1', imageFlag: '1' });
   const data = await fetchJson(`${RAKUTEN_API_BASE}?${q}`, { attempts: 1 });
   const items = (data.Items || data.items || []).map(normalizeItem)
     .filter(i => i.itemName && i.itemCode && i.price > 0 && /^https:\/\//.test(i.affiliateUrl))
-    .sort((a, b) => (itemScore(b)+keywordRelevanceBonus(keyword,b.itemName))
-       - (itemScore(a)+keywordRelevanceBonus(keyword,a.itemName)));
+    .sort((a, b) => (researchScore(b,lane)+itemScore(b)*0.25+keywordRelevanceBonus(keyword,b.itemName))
+       - (researchScore(a,lane)+itemScore(a)*0.25+keywordRelevanceBonus(keyword,a.itemName)));
   const candidates = items.filter(i => !excluded.has(i.itemCode));
   if (IMAGE_CARD_ENABLED) {
     const licensed = candidates.find(i => approvedImageFor(i, DATA_DIR, { hasAffiliateLink: role === 'revenue' }));
@@ -195,18 +196,19 @@ function dueSlot() {
 }
 
 async function postFor(slot, { catchup = false } = {}) {
-  const cooldownSeconds = rakutenCooldownRemaining(state.lastRakutenRateLimitAt);
-  if (cooldownSeconds > 0) {
-    state.lastDecision = 'rakuten_rate_limit_cooldown';
-    return;
-  }
   const official = await threadsToday();
   if (official.length >= MAX_POSTS) { state.lastDecision = 'daily_cap_reached'; return; }
   if (todayLocalPosts().some(p => p.slot === slot)) { state.lastDecision = 'slot_already_posted'; return; }
-  const role = catchup ? 'discovery' : roleForSlot(slot, SLOTS, nowJst().getUTCDate());
-  let text = null;
+  const role = catchup ? 'guide' : roleForSlot(slot, SLOTS, nowJst().getUTCDate());
+  const lane = role === 'revenue' ? researchLane(dayKey()) : 'popular_proxy';
+  // Rakuten rate limits must not block reader-first posts that need no Rakuten API.
+  if(role!=='guide' && rakutenCooldownRemaining(state.lastRakutenRateLimitAt)>0){
+    state.lastDecision='rakuten_rate_limit_cooldown';return;
+  }
+  let text = role === 'guide' ? editorialGuide(dayKey(),slot) : null;
   let chosenItem = null;
-  const meta = { role, slot, catchup, copyPolicy: 'product-first-v1' };
+  const meta = { role, slot, catchup, copyPolicy: EDITORIAL_POLICY_VERSION,
+    ...(role==='revenue' ? {researchLane:lane, researchLaneEvidence:'proxy_not_verified_sales'} : {}) };
   const copyVariant = role === 'revenue' ? revenueCopyVariant(dayKey()) : null;
   const used = recentlyFeaturedItems();
   const keywordBase = (nowJst().getUTCDate() + Math.max(0, SLOTS.indexOf(slot))) % KEYWORDS.length;
@@ -214,7 +216,7 @@ async function postFor(slot, { catchup = false } = {}) {
     const kw = KEYWORDS[(keywordBase + attempt) % KEYWORDS.length];
     try {
       state.lastRakutenKeyword = kw;
-      const item = await rakutenBest(kw, used, role);
+      const item = await rakutenBest(kw, used, role, lane);
       if (!item) continue;
       text = role === 'revenue' ? revenueText(item,copyVariant) : editorialText(item, role);
       if (text) {

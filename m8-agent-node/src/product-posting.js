@@ -37,7 +37,7 @@ export function validatePublicationText(text, {affiliateUrl=null, revenue=false}
   if (/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]|(?:繧[ｦｭｸｹ]|縺[ｾｪｮｨ]|萓ｿ蛻ｩ)/u.test(text))
     return 'suspicious_mojibake_or_control_char';
   if (revenue) {
-    if (!text.startsWith('【PR・アフィリエイト】')) return 'pr_disclosure_missing';
+    if (!text.startsWith('【PR】')) return 'pr_disclosure_missing';
     if (typeof affiliateUrl!=='string'||!/^https:\/\//.test(affiliateUrl)||!text.endsWith(affiliateUrl))
       return 'affiliate_url_missing_or_modified';
   }
@@ -46,13 +46,18 @@ export function validatePublicationText(text, {affiliateUrl=null, revenue=false}
 
 export function roleForSlot(slot, slots, dayNumber = 1) {
   const index = slots.indexOf(slot);
-  if (index < 0) return 'discovery';
-  if (slots.length === 1) return 'discovery';
-  if (slots.length === 2) return index === 0 ? 'discovery' : 'revenue';
-  if (index === 0) return 'discovery';
-  if (index === 1) return 'revenue';
-  if (index === 2) return dayNumber % 2 === 0 ? 'comparison' : 'discovery';
-  return index % 3 === 1 ? 'revenue' : 'discovery';
+  if(index < 0)return 'guide';
+  if(slots.length===1)return 'guide';
+  if(slots.length===2)return index===0?'guide':'revenue';
+  if(index===0)return 'guide';
+  if(index===1)return 'revenue';
+  // Half of evening posts are reader-first tips rather than product pitches.
+  // Even days alternate between discovery and product selection criteria.
+  if(index===2){
+    if(dayNumber%2===1)return 'guide';
+    return dayNumber%4===0?'comparison':'discovery';
+  }
+  return 'guide';
 }
 
 export function editorialText(item, mode = 'discovery') {
@@ -74,12 +79,12 @@ export function editorialText(item, mode = 'discovery') {
     ].filter(Boolean).join('\n\n').slice(0, 500);
   }
   return [
-    'こんなの見つけた！👀',
-    `「${name}」っていうアイテム。`,
+    '気になる便利道具を編集部目線でチェック',
+    `「${name}」`,
     useCase,
     [priceLine, reviews].filter(Boolean).join(' '),
-    '気になる……！ サイズや使い勝手を確認してみたい。',
-    '使っている人がいたら感想を聞きたいな。'
+    '使う場所・サイズ・お手入れのしやすさを、購入前に確かめたい。',
+    'このタイプ、どんな場面で便利そう？'
   ].filter(Boolean).join('\n\n').slice(0, 500);
 }
 
@@ -103,11 +108,11 @@ export function revenueText(item, variant='spec_check') {
   const lead = variant==='compare_before_buy' ? '買う前に比較したい便利グッズ' : '今日の便利グッズ';
   const cta = variant==='compare_before_buy' ? 'サイズ・仕様・送料を商品ページで比較してみてください。' : '購入前にサイズ・仕様を確認してね。';
   const variants = [
-    ['【PR・アフィリエイト】', lead, `「${name}」`, useCase, price,
+    ['【PR】', lead, `「${name}」`, useCase, price,
       cta, url],
-    ['【PR・アフィリエイト】', `「${cleanProductName(item.itemName,25)}」`, price,
+    ['【PR】', `「${cleanProductName(item.itemName,25)}」`, price,
       '商品詳細はこちら',url],
-    ['【PR・アフィリエイト】',`「${cleanProductName(item.itemName,16)}」`,url]
+    ['【PR】',`「${cleanProductName(item.itemName,16)}」`,url]
   ];
   for(const parts of variants){
     const text=parts.filter(Boolean).join('\n');
