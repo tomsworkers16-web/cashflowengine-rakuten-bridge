@@ -3,6 +3,7 @@
 // This module deliberately does not presume ranking = sales volume.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildEditorialShortlist } from './editorial-shortlist.js';
 
 const ROOT='https://openapi.rakuten.co.jp';
 export const ENDPOINTS={
@@ -90,6 +91,10 @@ export async function runDiscoveryProbe({
       if(!response.ok)throw new Error('rakuten_'+api+'_http_'+response.status);
       const json=await response.json();
       output.results[api]=api==='genre'?genreSummary(json):rankingSummary(json);
+      if(api==='ranking'){
+        const all=rankingSummary(json,30);
+        output.editorialShortlist=buildEditorialShortlist(all.items,{max:5});
+      }
     }finally{clearTimeout(timer);}
     if(index<calls.length-1)await new Promise(resolve=>setTimeout(resolve,1100));
   }
