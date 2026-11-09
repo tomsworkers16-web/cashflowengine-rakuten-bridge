@@ -26,6 +26,16 @@ export function parseVerifiedItem(payload,itemCode){
     hasValidAffiliateUrl:hasLink,indicativeGrossYen,
     claimedSalesVolume:null,verifiedLongevity:null,verifiedConversionRate:null};
 }
+export function researchLane(candidate,detail){
+  if(!detail||!detail.hasValidAffiliateUrl||!(detail.price>0))return 'hold_unverified';
+  // Product popularity + accessible price support reach; higher indicative
+  // per-order commission supports commercial testing, not conversion claims.
+  if(detail.indicativeGrossYen>=100 && detail.reviewCount>=20 &&
+      detail.reviewAverage>=4) return 'revenue_test_candidate';
+  if(candidate.rank<=10 && detail.reviewAverage>=4 &&
+      detail.reviewCount>=20) return 'reach_test_candidate';
+  return 'needs_more_research';
+}
 export function addEvidenceScore(candidate,detail){
   if(!detail)return {...candidate,researchStatus:'item_not_found',evidenceScore:null};
   if(!detail.hasValidAffiliateUrl||!(detail.price>0))
@@ -36,7 +46,7 @@ export function addEvidenceScore(candidate,detail){
   else if(detail.reviewAverage>=4&&detail.reviewCount>=10){score+=10;reasons.push('rating_4_with_10_reviews');}
   if(detail.reviewCount>=30&&detail.reviewCount<500){score+=10;reasons.push('moderate_review_count_niche_hypothesis');}
   if(detail.indicativeGrossYen>=100){score+=10;reasons.push('gross_commission_estimate_100_or_more');}
-  return {...candidate,researchStatus:'candidate_for_editorial_review',evidenceScore:score,detail,
+  return {...candidate,researchStatus:'candidate_for_editorial_review',researchLane:researchLane(candidate,detail),evidenceScore:score,detail,
     additionalRationale:reasons};
 }
 export async function enrichShortlist(candidates,{applicationId,accessKey,affiliateId,fetchFn=fetch,delayMs=1100}={}){

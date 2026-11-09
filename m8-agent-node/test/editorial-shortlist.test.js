@@ -11,6 +11,8 @@ test('recognizes reader utility categories without making performance claims',()
  assert.equal(classifyTheme('キッチン排気口カバー'),'cleaning');
  assert.equal(classifyTheme('真空保存容器'),'food_preservation');
  assert.equal(classifyTheme('透明キッチンマット'),'floor_protection');
+ assert.equal(classifyTheme('ティータオル 水切りマット キッチンクロス'),'kitchen_textiles');
+ assert.equal(classifyTheme('VAKUEN 真空保存容器'),'food_preservation');
  const x=evaluateRankingCandidate(product(4,'kitchenavi','真空保存容器'));
  assert.equal(x.evidenceLevel,'ranking_and_title_only');
  assert.ok(x.requiresVerification.includes('review_context'));
