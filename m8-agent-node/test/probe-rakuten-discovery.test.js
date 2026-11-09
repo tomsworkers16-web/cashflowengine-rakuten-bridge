@@ -53,3 +53,30 @@ test('probe performs only two sequential GET requests',async()=>{
  assert.equal(JSON.stringify(result).includes('secret'),false);
  assert.equal(calls.every(c=>c.options.redirect==='error'),true);
 });
+
+test('live M8 anomaly: descending 30..1 is sorted BEFORE selecting the top ten',()=>{
+ const input=Array.from({length:30},(_,i)=>({
+   Item:{rank:30-i,itemCode:'test:'+(30-i),itemName:'検証用商品'}
+ }));
+ const result=rankingSummary({Items:input},10);
+ assert.equal(result.received,30);
+ assert.equal(result.sampled,10);
+ assert.deepEqual(result.items.map(x=>x.rank),[1,2,3,4,5,6,7,8,9,10]);
+});
+test('invalid zero, missing or unparseable ranks are not recommended as top results',()=>{
+ const result=rankingSummary({Items:[
+  {Item:{rank:0,itemCode:'invalid:1'}},
+  {Item:{rank:'unknown',itemCode:'invalid:2'}},
+  {Item:{rank:2,itemCode:'valid:2'}},
+  {Item:{rank:1,itemCode:'valid:1'}}
+ ]});
+ assert.deepEqual(result.items.map(x=>x.rank),[1,2]);
+ assert.equal(result.validRankCount,2);
+});
+test('genre-specific probe applies the selected genre to taxonomy and ranking',()=>{
+ const opts={applicationId:'app',accessKey:'secret',genreId:'562637'};
+ const ranking=makeRequest('ranking',opts);
+ const genre=makeRequest('genre',opts);
+ assert.equal(ranking.url.searchParams.get('genreId'),'562637');
+ assert.equal(genre.url.searchParams.get('genreId'),'562637');
+});
