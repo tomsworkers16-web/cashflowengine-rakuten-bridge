@@ -196,16 +196,15 @@ function dueSlot() {
 }
 
 async function postFor(slot, { catchup = false } = {}) {
-  const cooldownSeconds = rakutenCooldownRemaining(state.lastRakutenRateLimitAt);
-  if (cooldownSeconds > 0) {
-    state.lastDecision = 'rakuten_rate_limit_cooldown';
-    return;
-  }
   const official = await threadsToday();
   if (official.length >= MAX_POSTS) { state.lastDecision = 'daily_cap_reached'; return; }
   if (todayLocalPosts().some(p => p.slot === slot)) { state.lastDecision = 'slot_already_posted'; return; }
   const role = catchup ? 'guide' : roleForSlot(slot, SLOTS, nowJst().getUTCDate());
   const lane = role === 'revenue' ? researchLane(dayKey()) : 'popular_proxy';
+  // Rakuten rate limits must not block reader-first posts that need no Rakuten API.
+  if(role!=='guide' && rakutenCooldownRemaining(state.lastRakutenRateLimitAt)>0){
+    state.lastDecision='rakuten_rate_limit_cooldown';return;
+  }
   let text = role === 'guide' ? editorialGuide(dayKey(),slot) : null;
   let chosenItem = null;
   const meta = { role, slot, catchup, copyPolicy: EDITORIAL_POLICY_VERSION,
