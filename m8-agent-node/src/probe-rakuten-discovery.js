@@ -4,6 +4,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildEditorialShortlist } from './editorial-shortlist.js';
+import { enrichShortlist } from './rakuten-candidate-evidence.js';
 
 const ROOT='https://openapi.rakuten.co.jp';
 export const ENDPOINTS={
@@ -75,7 +76,7 @@ export function genreSummary(json,max=40){
 }
 
 export async function runDiscoveryProbe({
-  applicationId,accessKey,affiliateId,genreId=0,fetchFn=fetch
+  applicationId,accessKey,affiliateId,genreId=0,enrich=false,fetchFn=fetch
 }={}){
   const calls=[['genre',{}],['ranking',{}]];
   const output={status:'read_only',postingPerformed:false,persistencePerformed:false,
@@ -98,17 +99,22 @@ export async function runDiscoveryProbe({
     }finally{clearTimeout(timer);}
     if(index<calls.length-1)await new Promise(resolve=>setTimeout(resolve,1100));
   }
+  if(enrich){
+    output.itemEvidence=await enrichShortlist(output.editorialShortlist?.selected??[],
+      {applicationId,accessKey,affiliateId,fetchFn});
+  }
   return output;
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const genreOption=process.argv.slice(2).find(arg=>arg.startsWith('--genre-id='));
   const genreId=genreOption?genreOption.slice('--genre-id='.length):0;
+  const enrich=process.argv.slice(2).includes('--enrich');
   runDiscoveryProbe({
     applicationId:process.env.RAKUTEN_APPLICATION_ID,
     accessKey:process.env.RAKUTEN_ACCESS_KEY,
     affiliateId:process.env.RAKUTEN_AFFILIATE_ID,
-    genreId
+    genreId,enrich
   }).then(result=>console.log(JSON.stringify(result,null,2))).catch(error=>{
     const message=String(error?.message??'');
     const safe=/^(?:rakuten_credentials_missing|unsupported_api|invalid_genre_id|invalid_period|unexpected_ranking_shape|unexpected_genre_shape|rakuten_(?:ranking|genre)_http_\d{3})$/.test(message)
