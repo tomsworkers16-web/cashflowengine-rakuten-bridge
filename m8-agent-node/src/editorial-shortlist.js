@@ -10,10 +10,18 @@ const THEMES=[
  ['safety',/防災|備蓄|非常|停電|防犯/],
  ['digital',/スマホ|充電|USB|ケーブル|デスク|パソコン/]
 ];
+// Specific product identity wins over generic accessory terms like 水切り and マット.
+// Otherwise the 2026-11-10 live probe misclassified a dish-drying tea towel as storage.
+const SPECIFIC_THEMES=[
+ ['kitchen_textiles',/ティータオル|キッチンタオル|キッチンクロス|ふきん|布巾|ディッシュクロス/],
+ ['food_preservation',/真空保存|食品保存|フードストッカー|密閉容器|保存容器/],
+ ['floor_protection',/キッチンマット|フロアマット|床保護|透明マット/]
+];
 const AD_NOISE=/クーポン|OFF|送料無料|限定価格|マラソン|ポイント|楽天総合\d+位|楽天年間ランキング|先着|売り切れ|半額|超お得/u;
 
 export function classifyTheme(name){
  const n=String(name??'');
+ for(const [theme,re] of SPECIFIC_THEMES)if(re.test(n))return theme;
  for(const [theme,re] of THEMES)if(re.test(n))return theme;
  return 'unclassified';
 }
