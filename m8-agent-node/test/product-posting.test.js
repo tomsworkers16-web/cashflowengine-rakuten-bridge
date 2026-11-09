@@ -5,7 +5,7 @@ import { cleanProductName, editorialText, productUseCase, revenueText, revenueCo
 test('affiliate posts include a clear disclosure and the full original link', () => {
   const url = 'https://affiliate.example.jp/product?item=shop%3A10002149&affiliateId=abc';
   const text = revenueText({itemName:'テスト収納ラック',price:3960,affiliateUrl:url});
-  assert.ok(text.startsWith('【PR・アフィリエイト】'));
+  assert.ok(text.startsWith('【PR】'));
   assert.ok(text.endsWith(url));
   assert.ok(text.length <= 500);
   assert.match(text, /価格|3,960/);
@@ -27,7 +27,7 @@ test('editorial copy does not invent first-hand ownership or link to affiliate c
 });
 
 test('slot assignment reserves a revenue slot on multi-post days', () => {
-  assert.equal(roleForSlot('07:30',['07:30','12:30','19:30'],5),'discovery');
+  assert.equal(roleForSlot('07:30',['07:30','12:30','19:30'],5),'guide');
   assert.equal(roleForSlot('12:30',['07:30','12:30','19:30'],5),'revenue');
 });
 
@@ -56,7 +56,7 @@ test('guard rejects corrupted Japanese and missing PR disclosure without a netwo
   assert.equal(validatePublicationText('商品はおすすめです\nhttps://affiliate.invalid',{
     revenue:true,affiliateUrl:'https://affiliate.invalid'
   }),'pr_disclosure_missing');
-  assert.equal(validatePublicationText('【PR・アフィリエイト】\nhttps://a.invalid',{
+  assert.equal(validatePublicationText('【PR】\nhttps://a.invalid',{
     revenue:true,affiliateUrl:'https://b.invalid'
   }),'affiliate_url_missing_or_modified');
 });
@@ -69,7 +69,7 @@ test('affiliate copy experiments preserve disclosure, price and exact URL',()=>{
  for(const variant of ['spec_check','compare_before_buy']){
   const body=revenueText(item,variant);
   assert.equal(validatePublicationText(body,{revenue:true,affiliateUrl:url}),null);
-  assert.ok(body.startsWith('【PR・アフィリエイト】'));
+  assert.ok(body.startsWith('【PR】'));
   assert.ok(body.endsWith(url));
   assert.ok(body.includes('2,480'));
   assert.ok(!body.includes('使ってみた'));
@@ -121,4 +121,12 @@ test('long affiliate URLs prefer link safety over context paragraphs',()=>{
  assert.ok(post&&post.length<=500);
  assert.ok(post.endsWith(url));
  assert.equal(validatePublicationText(post,{affiliateUrl:url,revenue:true}),null);
+});
+
+test('reader-first schedule still protects daily conversion slot',()=>{
+ const slots=['07:30','12:30','19:30'];
+ const assigned=Array.from({length:7},(_,i)=>slots.map(s=>roleForSlot(s,slots,i+1)));
+ assert.equal(assigned.flat().filter(x=>x==='revenue').length,7);
+ assert.ok(assigned.flat().filter(x=>x==='guide').length>=10);
+ assert.ok(assigned.flat().filter(x=>x==='discovery'||x==='comparison').length>=3);
 });
