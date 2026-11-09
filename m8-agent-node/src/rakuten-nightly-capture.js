@@ -1,4 +1,4 @@
-// Once-daily headless Rakuten export. Runs only in the existing nightly
+// Once-daily headless Rakuten report capture. Runs only in the existing nightly
 // evaluation process; no window focus, posting, password entry or retries.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,16 +6,6 @@ import {inspectOrCapture} from './rakuten-browser-report.js';
 
 export function rakutenAutoCaptureDay(now=Date.now()){
  return new Date(now+9*3600000).toISOString().slice(0,10);
-}
-// Suppress the next two nightly exports after a known invalid date value,
-// then try again. This does not affect manual inspect or offline imports.
-export function shouldPauseInvalidDateExport(state,day,cooldownDays=2){
- if(state?.lastResult!=='downloaded_csv_needs_valid_dates')return false;
- const previous=String(state.lastAttemptDay||'');
- if(!/^\d{4}-\d{2}-\d{2}$/.test(previous))return false;
- const diff=(Date.parse(day+'T00:00:00+09:00')
-   -Date.parse(previous+'T00:00:00+09:00'))/86400000;
- return Number.isInteger(diff)&&diff>0&&diff<=cooldownDays;
 }
 export async function runRakutenNightlyCapture(dataDir, {
  now=Date.now(),enabled=true,capture=inspectOrCapture
