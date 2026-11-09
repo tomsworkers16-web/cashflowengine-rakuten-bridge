@@ -1,3 +1,5 @@
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
 // Read-only, bounded Rakuten Product Search release-date feasibility probe.
 // Does not publish, persist product data, or print API credentials.
 const ENDPOINT = 'https://openapi.rakuten.co.jp/ichibaproduct/api/Product/Search/20250801';
@@ -83,7 +85,7 @@ async function main(){
   const result=await runProbe({applicationId,accessKey});
   console.log(JSON.stringify(result,null,2));
 }
-if(import.meta.url===new URL('file://'+process.argv[1]?.replace(/\\/g,'/')).href){
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   main().catch(e=>{
     // Never print raw request URL, response body or exception containing credentials.
     const reason=String(e.message||'error');
