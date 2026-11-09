@@ -121,6 +121,23 @@ test('prior recorded UI success continues using UI even after restart and previo
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 
+test('UI preference survives interrupted nightly job and prevents CSV retry',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-rakuten-ui-interrupt-'));
+ try{
+  const statePath=path.join(dir,'rakuten-nightly-capture.json');
+  fs.writeFileSync(statePath,JSON.stringify({lastAttemptDay:'2026-11-09',
+   lastResult:'ui_daily_fallback_imported'}));
+  const now=Date.parse('2026-11-10T14:45:00Z');
+  const first=await runRakutenNightlyCapture(dir,{now,capture:async()=>{throw Error('simulated_crash');}});
+  assert.equal(first.status,'capture_exception');
+  assert.equal(JSON.parse(fs.readFileSync(statePath,'utf8')).preferredCaptureMode,'ui_daily');
+  const next=await runRakutenNightlyCapture(dir,{now:now+86400000,
+   capture:async args=>({status:args.mode==='ui_daily'?'ui_daily_fallback_imported':'unexpected_download'})});
+  assert.equal(next.status,'ui_daily_fallback_imported');
+  assert.equal(next.noDownload,true);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
 test('night capture records safe monthly export metadata without original URL or token',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cfe-export-month-'));
  try{
