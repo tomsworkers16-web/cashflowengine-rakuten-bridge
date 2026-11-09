@@ -7,6 +7,7 @@ import {inspectRejectedRakutenCsv} from './rakuten-rejected-status.js';
 import {auditRakutenRejectedExports} from './rakuten-export-audit.js';
 import {summarizeLocalAffiliateExposure} from './local-affiliate-exposure.js';
 import {firstRevenuePriority} from './first-revenue-priority.js';
+import {inspectRakutenReportCoverage} from './rakuten-report-coverage.js';
 
 const load=(filename)=>{
  try{return JSON.parse(fs.readFileSync(filename,'utf8'));}
@@ -63,6 +64,7 @@ export function buildLocalRevenueStatus(dataDir,now=Date.now()){
   rejectedCsv,
   exportAudit,
   exposure,
+  reportCoverage:inspectRakutenReportCoverage(evidence),
   sevenDay:{from:evidence.from,to:evidence.to,
     daysReported:evidence.daysReported,daysMissing:evidence.daysMissing,
     metricCoverage:evidence.metricCoverage,
