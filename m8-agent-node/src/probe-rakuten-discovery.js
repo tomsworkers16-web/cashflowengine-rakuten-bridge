@@ -33,20 +33,28 @@ const genreObj=x=>x?.genre??x?.Genre??x;
 export function rankingSummary(json,max=10){
   const input=json?.Items??json?.items;
   if(!Array.isArray(input))throw new Error('unexpected_ranking_shape');
+  // The API may return page entries in descending rank order. Sort the full
+  // response BEFORE limiting; slicing the raw array returned ranks 30..21
+  // rather than 1..10 in the 2026-11-10 M8 live probe.
+  const entries=input.map(entry=>{
+    const i=unwrap(entry);
+    const number=Number(i?.rank);
+    return {
+      rank:Number.isInteger(number)&&number>0?number:null,
+      itemCode:String(i?.itemCode??'').slice(0,120),
+      itemName:String(i?.itemName??'').slice(0,100),
+      genreId:i?.genreId??null,
+      price:Number.isFinite(Number(i?.itemPrice))?Number(i.itemPrice):null,
+      hasAffiliateUrl:typeof i?.affiliateUrl==='string'&&i.affiliateUrl.startsWith('https://')
+    };
+  });
+  const ranked=entries.filter(i=>i.rank!==null).sort((a,b)=>a.rank-b.rank);
   return {
     asOf:json?.lastBuildDate??null,
-    sampled:Math.min(max,input.length),
-    items:input.slice(0,max).map(entry=>{
-      const i=unwrap(entry);
-      return {
-        rank:Number.isFinite(Number(i?.rank))?Number(i.rank):null,
-        itemCode:String(i?.itemCode??'').slice(0,120),
-        itemName:String(i?.itemName??'').slice(0,100),
-        genreId:i?.genreId??null,
-        price:Number.isFinite(Number(i?.itemPrice))?Number(i.itemPrice):null,
-        hasAffiliateUrl:typeof i?.affiliateUrl==='string'&&i.affiliateUrl.startsWith('https://')
-      };
-    })
+    received:input.length,
+    validRankCount:ranked.length,
+    sampled:Math.min(max,ranked.length),
+    items:ranked.slice(0,max)
   };
 }
 
@@ -89,10 +97,13 @@ export async function runDiscoveryProbe({
 }
 
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+  const genreOption=process.argv.slice(2).find(arg=>arg.startsWith('--genre-id='));
+  const genreId=genreOption?genreOption.slice('--genre-id='.length):0;
   runDiscoveryProbe({
     applicationId:process.env.RAKUTEN_APPLICATION_ID,
     accessKey:process.env.RAKUTEN_ACCESS_KEY,
-    affiliateId:process.env.RAKUTEN_AFFILIATE_ID
+    affiliateId:process.env.RAKUTEN_AFFILIATE_ID,
+    genreId
   }).then(result=>console.log(JSON.stringify(result,null,2))).catch(error=>{
     const message=String(error?.message??'');
     const safe=/^(?:rakuten_credentials_missing|unsupported_api|invalid_genre_id|invalid_period|unexpected_ranking_shape|unexpected_genre_shape|rakuten_(?:ranking|genre)_http_\d{3})$/.test(message)
