@@ -60,7 +60,10 @@ export async function runRakutenNightlyCapture(dataDir, {
   const uiOnly=['ui_daily_fallback_imported','downloaded_csv_needs_valid_dates',
     'ui_daily_unverified'].includes(state.lastResult)
     || state.preferredCaptureMode==='ui_daily';
-  write({...state,lastAttemptDay:day,lastResult:'in_progress'});
+  // Persist UI preference before browser work: process interruption must not
+  // accidentally restore automatic CSV retry on the following night.
+  write({...state,lastAttemptDay:day,lastResult:'in_progress',
+    preferredCaptureMode:uiOnly?'ui_daily':state.preferredCaptureMode});
   let result;
   try{result=await capture({mode:uiOnly?'ui_daily':'download',
     interactive:false,dataDir:root});}
