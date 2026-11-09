@@ -61,7 +61,7 @@ test('explicit one-shot publishes exactly once; dry-run performs no POST and ret
    .trim().split(/\r?\n/).map(JSON.parse);
   assert.deepEqual(records.map(x=>x.meta.publishStatus),['pending','posted']);
   assert.equal(records[1].meta.role,'revenue');
-  assert.match(records[1].text,/【PR・アフィリエイト】/);
+  assert.match(records[1].text,/【PR】/);
   assert.match(records[1].text,/https:\/\/example\.invalid\/affiliate\/123/);
   const again=await run(env);
   assert.notEqual(again.code,0);
