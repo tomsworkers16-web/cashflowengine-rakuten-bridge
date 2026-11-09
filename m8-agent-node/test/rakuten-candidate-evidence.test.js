@@ -28,6 +28,11 @@ test('exact item matching and gross-only commission calculation',()=>{
 test('candidate quality score is evidence limited and has no fake profit forecast',()=>{
  const enriched=addEvidenceScore(candidate,parseVerifiedItem(response,'demo:123'));
  assert.equal(enriched.researchStatus,'candidate_for_editorial_review');
+ assert.equal(enriched.researchLane,'revenue_test_candidate');
+ const reach=addEvidenceScore({...candidate,rank:7}, {...parseVerifiedItem(response,'demo:123'),indicativeGrossYen:59});
+ assert.equal(reach.researchLane,'reach_test_candidate');
+ const hold=addEvidenceScore(candidate,{...parseVerifiedItem(response,'demo:123'),hasValidAffiliateUrl:false});
+ assert.equal(hold.researchStatus,'not_eligible');
  assert.ok(enriched.evidenceScore>candidate.priority);
  assert.equal(enriched.detail.claimedSalesVolume,null);
  assert.equal(enriched.detail.verifiedLongevity,null);
