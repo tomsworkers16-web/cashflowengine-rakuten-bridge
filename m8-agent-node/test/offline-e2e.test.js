@@ -78,7 +78,7 @@ test('offline end-to-end: Rakuten item -> PR copy -> mock Threads POST -> durabl
       await delay(100);
     }
     assert.equal(mock.posts,1,'exactly one mock Threads POST; agent log: '+agentLog.slice(-3000));
-    assert.match(mock.requestText,/【PR・アフィリエイト】/);
+    assert.match(mock.requestText,/【PR】/);
     assert.match(mock.requestText,/https:\/\/example\.invalid\/affiliate\/demo123/);
     assert.deepEqual(rows.map(x=>x.meta.publishStatus),['pending','posted']);
     assert.equal(rows.at(-1).meta.itemCode,'demo:123');
