@@ -38,7 +38,7 @@ export function researchLane(jstDate){
 }
 
 export function researchSort(lane){
-  return lane==='emerging_proxy' ? '-updateTimestamp' : '-reviewCount';
+  return lane==='emerging_proxy' ? '-updateTimestamp' : lane==='popular_proxy' ? '-reviewCount' : 'standard';
 }
 
 export function researchScore(item,lane){
