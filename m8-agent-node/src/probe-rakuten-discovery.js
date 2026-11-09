@@ -19,7 +19,7 @@ export function makeRequest(api,{applicationId,accessKey,affiliateId,genreId=0,p
   url.searchParams.set('applicationId',String(applicationId));
   url.searchParams.set('format','json');
   url.searchParams.set('formatVersion','2');
-  url.searchParams.set('genreId',String(genreId));
+  if(api==='genre'||Number(genreId)!==0)url.searchParams.set('genreId',String(genreId));
   if(api==='ranking'){
     url.searchParams.set('page','1');
     if(period)url.searchParams.set('period',period);
