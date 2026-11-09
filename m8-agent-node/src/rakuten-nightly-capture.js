@@ -54,10 +54,6 @@ export async function runRakutenNightlyCapture(dataDir, {
   if(state.lastAttemptDay===day)return {
    status:'already_attempted_today',jstDay:day,lastResult:state.lastResult||'unknown',noPosting:true
   };
-  if(shouldPauseInvalidDateExport(state,day))return {
-   status:'paused_invalid_csv_dates',jstDay:day,
-   lastResult:state.lastResult,noPosting:true,noDownload:true
-  };
   // Commit the attempt BEFORE entering Chrome. Never retry a clicked export
   // just because a scheduled task or Windows process was interrupted.
   const write=(value)=>{
@@ -67,14 +63,13 @@ export async function runRakutenNightlyCapture(dataDir, {
     fs.renameSync(tmp,statePath);
    }finally{fs.rmSync(tmp,{force:true});}
   };
-  // Once a strictly verified UI fallback works, avoid downloading the same
-  // malformed CSV on the next two nights. Retry official CSV every third day.
-  const csvDay=String(state.lastCsvAttemptDay||'');
-  const sinceCsv=/^\d{4}-\d{2}-\d{2}$/.test(csvDay)
-   ?(Date.parse(day+'T00:00:00+09:00')-Date.parse(csvDay+'T00:00:00+09:00'))/86400000
-   :Infinity;
-  const uiOnly=state.lastResult==='ui_daily_fallback_imported'
-   &&Number.isInteger(sinceCsv)&&sinceCsv>0&&sinceCsv<3;
+  // Once a verified UI fallback succeeds OR the CSV date is known invalid,
+  // stop scheduling repeated CSV downloads. Use the daily UI instead.
+  // Existing validated CSV users remain on the current path unless a later
+  // invalid-date result switches them to UI.
+  const uiOnly=['ui_daily_fallback_imported','downloaded_csv_needs_valid_dates',
+    'ui_daily_unverified'].includes(state.lastResult)
+    || state.preferredCaptureMode==='ui_daily';
   write({...state,lastAttemptDay:day,lastResult:'in_progress'});
   let result;
   try{result=await capture({mode:uiOnly?'ui_daily':'download',
@@ -107,6 +102,7 @@ export async function runRakutenNightlyCapture(dataDir, {
     ?true:result?.exportTarget?.reportMonthMatches===false?false:'unknown';
   const exportFormatCsv=result?.exportTarget?.csvFormatSpecified===true;
   write({...state,lastAttemptDay:day,lastResult:sanitized,
+   preferredCaptureMode:uiOnly||sanitized==='ui_daily_fallback_imported'||sanitized==='downloaded_csv_needs_valid_dates'?'ui_daily':state.preferredCaptureMode,
    lastCsvAttemptDay:uiOnly?state.lastCsvAttemptDay:day,
    lastVisibleDayRowCount:visibleDateRowCount,lastHasDatedRows:hasDatedRows,
    lastExportDateValidation:exportDateValidation,
