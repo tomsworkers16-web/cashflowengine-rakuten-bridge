@@ -7,7 +7,8 @@ import { chromium } from 'playwright-core';
 import { shouldRunNightly, nightlyWindow } from './nightly-schedule.js';
 import { isRakutenRateLimitError, rakutenCooldownRemaining } from './rakuten-rate-policy.js';
 import { makeExternalReplyEngine, scoreCandidate } from './external-reply-engine.js';
-import { roleForSlot, editorialText, revenueText, revenueCopyVariant, validatePublicationText } from './product-posting.js';
+import { roleForSlot, editorialText, validatePublicationText } from './product-posting.js';
+import { buildRevenueCopy } from './reader-first-copy.js';
 import { keywordRelevanceBonus } from './product-relevance.js';
 import { EDITORIAL_POLICY_VERSION, editorialGuide, researchLane, researchSort, researchScore } from './editorial-strategy.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
@@ -209,7 +210,7 @@ async function postFor(slot, { catchup = false } = {}) {
   let chosenItem = null;
   const meta = { role, slot, catchup, copyPolicy: EDITORIAL_POLICY_VERSION,
     ...(role==='revenue' ? {researchLane:lane, researchLaneEvidence:'proxy_not_verified_sales'} : {}) };
-  const copyVariant = role === 'revenue' ? revenueCopyVariant(dayKey()) : null;
+  const readerFirstEnabled = String(env.CFE_READER_FIRST_COPY_ENABLED || 'false').toLowerCase() === 'true';
   const used = recentlyFeaturedItems();
   const keywordBase = (nowJst().getUTCDate() + Math.max(0, SLOTS.indexOf(slot))) % KEYWORDS.length;
   for (let attempt = 0; attempt < Math.min(KEYWORDS.length, 3) && !text; attempt++) {
@@ -218,10 +219,11 @@ async function postFor(slot, { catchup = false } = {}) {
       state.lastRakutenKeyword = kw;
       const item = await rakutenBest(kw, used, role, lane);
       if (!item) continue;
-      text = role === 'revenue' ? revenueText(item,copyVariant) : editorialText(item, role);
+      const copy = role === 'revenue' ? buildRevenueCopy(item,dayKey(),{enabled:readerFirstEnabled}) : null;
+      text = copy ? copy.text : editorialText(item, role);
       if (text) {
         chosenItem = item;
-        Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue', ...(copyVariant ? {copyVariant} : {}) });
+        Object.assign(meta, { keyword: kw, itemCode: item.itemCode, price: item.price, affiliate: role === 'revenue', ...(copy ? {copyVariant:copy.copyVariant,copyExperiment:copy.experiment} : {}) });
       }
     } catch (e) {
       event('RAKUTEN_PRODUCT_ERROR', { keyword: kw, error: e.message });
