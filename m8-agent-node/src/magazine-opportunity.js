@@ -15,8 +15,9 @@ export async function discoverRevenueOpportunity(day,slot,{search,history=[]}={}
   const unique=[...new Map(matches.filter(x=>x.price>0).map(x=>[x.itemCode,x])).values()];
   const scored=unique.map(candidate=>{
    const raw=items.find(x=>x.itemCode===candidate.itemCode);
-   const reviews=Number(raw.reviewCount),rating=Number(raw.reviewAverage);
-   const rate=Number(raw.affiliateRate);
+   const numeric=v=>v===null||v===undefined||v===''?NaN:Number(v);
+   const reviews=numeric(raw.reviewCount),rating=numeric(raw.reviewAverage);
+   const rate=numeric(raw.affiliateRate);
    const reviewProxy=Number.isFinite(reviews)&&reviews>0?Math.min(30,Math.log10(1+reviews)*10):0;
    const ratingProxy=Number.isFinite(rating)&&rating>=4&&rating<=5?10:0;
    const rewardEstimate=Number.isFinite(rate)&&rate>0&&rate<=100?Math.floor(candidate.price*rate/100):null;
