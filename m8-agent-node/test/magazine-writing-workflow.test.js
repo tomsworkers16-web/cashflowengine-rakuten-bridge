@@ -14,3 +14,15 @@ test('missing writer is explicit; unsupported claims and duplicate lines rejecte
  assert.equal(reviewArticle('同じ文章\n同じ文章').status,'rejected');
  assert.equal(reviewArticle('https://example.com').status,'rejected');
 });
+
+test('conversation policy travels to writer and excessive questions are warnings, not proof of quality',async()=>{
+ const r=await draftMagazineIssue('2026-11-11','19:30',{search:async()=>[],writer:async b=>{
+  assert.equal(b.voicePolicy.version,'conversation-v1');
+  assert.ok(b.voicePolicy.approaches.length>=4);
+  return '収納が足りない？\n取り出すときは？\n戻すときは？\n棚の奥はどうですか？';
+ }});
+ assert.equal(r.status,'manual_editorial_review_required');
+ assert.ok(r.review.warnings.includes('review_excessive_questions'));
+ assert.ok(r.review.checksStillRequired.includes('conversational_flow'));
+ assert.equal(r.publicationAllowed,false);
+});
