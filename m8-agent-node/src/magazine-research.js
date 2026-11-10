@@ -7,16 +7,26 @@ export async function researchMagazineIssue(day,slot,{search}={}){
  const items=await search(issue.researchKeyword);
  return previewMagazineWithProducts(day,slot,items);
 }
-export function createRakutenEditorialSearch({env=process.env,fetchImpl=fetch}={}){
+export function createRakutenEditorialSearch({env=process.env,fetchImpl=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms))}={}){
+ let calls=0,blocked=false;
  return async keyword=>{
+  if(blocked)throw Error('rakuten_search_http_429');
   const {RAKUTEN_APPLICATION_ID:applicationId,RAKUTEN_ACCESS_KEY:accessKey,RAKUTEN_AFFILIATE_ID:affiliateId}=env;
   if(!applicationId||!accessKey||!affiliateId)throw Error('rakuten_credentials_missing');
   const q=new URLSearchParams({applicationId,accessKey,affiliateId,keyword,format:'json',hits:'20',availability:'1',sort:'standard'});
   const base=env.RAKUTEN_API_BASE||'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
+  if(calls>0)await sleep(2000);
+  calls++;
   let response;
   try{response=await fetchImpl(base+'?'+q,{signal:AbortSignal.timeout(15000)});}
   catch{throw Error('rakuten_search_unavailable');}
-  if(!response.ok)throw Error('rakuten_search_http_'+response.status);
+  if(!response.ok){
+   if(response.status===429)blocked=true;
+   const error=Error('rakuten_search_http_'+response.status);
+   error.searchNumber=calls;
+   error.retryAfter=response.headers?.get?.('retry-after')||null;
+   throw error;
+  }
   let data;try{data=await response.json();}catch{throw Error('rakuten_search_invalid_json');}
   const rows=data.Items||data.items;
   if(!Array.isArray(rows))throw Error('rakuten_search_invalid_shape');
