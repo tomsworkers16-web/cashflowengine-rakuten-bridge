@@ -77,3 +77,6 @@
 
 ### 公開準備の判断
 通常投稿は500文字以内。長い楽天リンク2本を無理に同じ投稿へ入れず、比較本文を非商用として使うか、PR表記付きの各商品別記事に分ける。比較記事に広告を含める場合は広告であることを明示し、各リンクを正確に保持する。長文添付API未検証のため長文自動公開は保留。実際の商品の仕様確認、最終原稿、公開承認は未実施。
+
+## M8広告原稿生成の実機確認
+HEAD 2c45a0eで preview-magazine-pilot-drafts.js を実行し、drafts_ready_for_manual_review を確認。latuna:10000000 は415文字、rack-town:10000550 は428文字、両方error=null、review.errors=[]、warnings=[]。実際の保存済みアフィリエイトURLとPR表記を保持。comparisonEligible=true、publicationAllowed=false。API再検索・公開なし。原稿は固定試作であり、生成AIの自動執筆・事実確認・本番スケジューラ連携は未実施。次工程は既存AIプロバイダと公開前レビュー経路の確認、非公開の生成AI試験。ASCII JSONは正常な仕様。
