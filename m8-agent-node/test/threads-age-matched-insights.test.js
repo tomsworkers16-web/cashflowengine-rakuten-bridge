@@ -54,3 +54,15 @@ test('unrelated or invalid aged snapshots do not create fake readings',()=>{
  assert.equal(x.observedPosts,0);
  assert.throws(()=>summarizeAgeMatchedThreads([],[],{targetDay:'bad'}),/invalid_age/);
 });
+
+test('next-night snapshots include morning at 40 hours and evening at 28 hours without mixing slots',()=>{
+ const a={...post('A','07:30'),at:'2026-11-08T07:30:00+09:00'};
+ const b={...post('B','19:30'),at:'2026-11-08T19:30:00+09:00'};
+ const r=summarizeAgeMatchedThreads([a,b],[report('2026-11-09T23:45:00+09:00','A',8),report('2026-11-09T23:45:00+09:00','B',4)],{targetDay:'2026-11-10'});
+ assert.equal(r.observedPosts,2);
+ assert.equal(r.records.find(x=>x.postId==='A').actualAgeHours,40.3);
+ assert.equal(r.records.find(x=>x.postId==='B').actualAgeHours,28.3);
+ assert.equal(r.groups.length,2);
+ assert.deepEqual(r.groups.map(x=>x.slot).sort(),['07:30','19:30']);
+ assert.equal(r.records.find(x=>x.postId==='A').viewsAtObservedAge,8);
+});

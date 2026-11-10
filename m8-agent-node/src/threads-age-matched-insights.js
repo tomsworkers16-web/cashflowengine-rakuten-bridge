@@ -13,7 +13,7 @@ function readJsonl(filename){
   try{return JSON.parse(x);}catch{return null;}
  }).filter(Boolean);}catch{return [];}
 }
-export function summarizeAgeMatchedThreads(posts,reports,{targetDay,days=7,minHours=18,maxHours=36}={}){
+export function summarizeAgeMatchedThreads(posts,reports,{targetDay,days=7,minHours=18,maxHours=42}={}){
  if(!/^\d{4}-\d{2}-\d{2}$/.test(targetDay)||!Number.isInteger(days)||days<1||days>31
   ||!(minHours>=0)||!(maxHours>minHours)||maxHours>168)throw Error('invalid_age_comparison_window');
  const target=Date.parse(targetDay+'T00:00:00+09:00');
@@ -48,12 +48,13 @@ export function summarizeAgeMatchedThreads(posts,reports,{targetDay,days=7,minHo
    hook:detectHookType(post.text),
    postId,observationStatus:chosen?'observed':'missing',
    viewsNear24Hours:chosen?chosen.views:'unknown',
+   viewsAtObservedAge:chosen?chosen.views:'unknown',
    actualAgeHours:chosen?Math.round(chosen.ageHours*10)/10:'unknown'});
  }
  const grouped=new Map();
  for(const rec of records){
-  const key=rec.role+'/'+rec.hook;
-  if(!grouped.has(key))grouped.set(key,{role:rec.role,hook:rec.hook,
+  const key=rec.slot+'/'+rec.role+'/'+rec.hook;
+  if(!grouped.has(key))grouped.set(key,{slot:rec.slot,role:rec.role,hook:rec.hook,
    publishedPosts:0,postsWithAgeMatchedViews:0,totalAgeMatchedViews:0,missing:0});
   const g=grouped.get(key);g.publishedPosts++;
   if(typeof rec.viewsNear24Hours==='number'){
@@ -62,6 +63,7 @@ export function summarizeAgeMatchedThreads(posts,reports,{targetDay,days=7,minHo
  }
  return {mode:'read_only_no_post',from,to:targetDay,
   targetObservationAgeHours:24,acceptedAgeRangeHours:[minHours,maxHours],
+  comparisonPolicy:'same_slot_only; nightly snapshots are not exact 24h metrics',
   publishedPosts:records.length,observedPosts:records.filter(x=>x.observationStatus==='observed').length,
   groups:[...grouped.values()].map(g=>({...g,
    averageViewsNear24h:g.postsWithAgeMatchedViews
@@ -69,8 +71,8 @@ export function summarizeAgeMatchedThreads(posts,reports,{targetDay,days=7,minHo
    comparisonReady:g.postsWithAgeMatchedViews>=5}))
    .sort((a,b)=>b.postsWithAgeMatchedViews-a.postsWithAgeMatchedViews),
   observationCoverageWarning:records.some(x=>x.observationStatus==='missing'),
-  recommendedAction:'Use comparable-age observations only as a descriptive benchmark; do not automatically select winning copy or modify posting schedules.',
-  caveat:'Snapshots are observed between 18 and 36 hours after posting, not exact 24-hour metrics. Report availability, selection and audience differ; no causal effect, affiliate clicks, conversions or profit are established.',
+  recommendedAction:'Compare only within the same posting slot and inspect actual ages; do not automatically select winning copy or modify posting schedules.',
+  caveat:'Snapshots are observed between 18 and 42 hours after posting by default, not exact 24-hour metrics; morning posts may be about 40 hours old. Do not compare slots as equal-age cohorts. Report availability, selection and audience differ; no causal effect, affiliate clicks, conversions or profit are established.',
   records};
 }
 export function readAgeMatchedThreads(dataDir,day,days=7){
