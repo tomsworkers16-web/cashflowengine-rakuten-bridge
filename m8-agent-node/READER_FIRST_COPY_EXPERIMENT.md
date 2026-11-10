@@ -1,0 +1,5 @@
+# Reader-first revenue copy experiment
+
+Default: disabled. Existing posting text remains unchanged unless CFE_READER_FIRST_COPY_ENABLED=true is explicitly approved and enabled in M8 .env. When enabled, eligible odd-JST-calendar-day revenue posts use a product-specific problem question; even days retain the existing compare-before-buy copy as a control. Unsupported categories or long URLs fall back to legacy copy and are logged with the actual variant. This is an exploratory comparison, not randomized causal evidence: products, days and audiences differ.
+
+The experiment leaves posting slots, limits, link destinations, PR disclosure, product-selection logic, auto-reply and image settings unchanged. No automatic winner selection, spend or posting during development. Before activation: owner approval of production change, verify current configuration and process restart requirements, preview example drafts. After activation: compare same-slot observations and review Rakuten aggregate clicks independently; do not infer post-level sales. Rollback: unset the flag and restart the runtime using the established procedure.
