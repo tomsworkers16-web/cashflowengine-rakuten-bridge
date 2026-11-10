@@ -1,8 +1,10 @@
 import {discoverRevenueOpportunity} from './magazine-opportunity.js';
 import {createRakutenEditorialSearch} from './magazine-research.js';
 import {buildWriterBrief} from './magazine-writing-workflow.js';
+import {createRakutenRankingSearch,attachRankingEvidence} from './magazine-ranking.js';
 const day=process.argv[2]||new Date(Date.now()+9*3600000).toISOString().slice(0,10);
 try{
- const result=await discoverRevenueOpportunity(day,'19:30',{search:createRakutenEditorialSearch(),includeSeasonal:true});
+ let result=await discoverRevenueOpportunity(day,'19:30',{search:createRakutenEditorialSearch(),includeSeasonal:true});
+ if(process.argv.includes('--ranking'))result=attachRankingEvidence(result,await createRakutenRankingSearch()());
  console.log(JSON.stringify({...result,writerBrief:result.selected?buildWriterBrief({...result.selected.issue,candidates:[result.selected.product]}):null},null,2));
-}catch(e){console.error(JSON.stringify({status:'failed',reason:/^rakuten_search_http_\d+$|^rakuten_credentials_missing$/.test(e.message)?e.message:'opportunity_scan_failed'}));process.exitCode=1;}
+}catch(e){console.error(JSON.stringify({status:'failed',reason:/^(?:rakuten_search|ranking)_http_\d+$|^rakuten_credentials_missing$/.test(e.message)?e.message:'opportunity_scan_failed'}));process.exitCode=1;}
