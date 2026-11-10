@@ -1,6 +1,7 @@
 // Offline editorial candidate matching; normalized Rakuten item records are supplied by caller.
 import {planMagazineIssue} from './magazine-editorial.js';
 import {cleanProductName,validatePublicationText} from './product-posting.js';
+import {seasonalTitleMatches} from './magazine-seasonal-lanes.js';
 const rules={
  'storage-flow':[/収納/u,/ラック|棚/u],
  'washbasin':[/洗面台|洗面所/u,/排水口|ヘアーキャッチャー|ゴミ受け/u],
@@ -8,10 +9,10 @@ const rules={
 };
 export function matchEditorialProducts(issue,items){
  const conditions=rules[issue?.topicId]||[];
- if(!conditions.length)return [];
+
  return (Array.isArray(items)?items:[]).filter(item=>{
   const title=String(item?.itemName||'');
-  return conditions.every(r=>r.test(title))&&typeof item.itemCode==='string'&&
+  return (conditions.length?conditions.every(r=>r.test(title)):seasonalTitleMatches(issue?.topicId,title))&&typeof item.itemCode==='string'&&
    /^[\w-]+:[\w-]+$/.test(item.itemCode)&&typeof item.affiliateUrl==='string'&&
    /^https:\/\//.test(item.affiliateUrl);
  }).map(item=>({itemCode:item.itemCode,itemName:cleanProductName(item.itemName),price:Number.isFinite(Number(item.price))&&Number(item.price)>0?Number(item.price):null,
