@@ -21,7 +21,7 @@ export function createRakutenEditorialSearch({env=process.env,fetchImpl=fetch}={
   const rows=data.Items||data.items;
   if(!Array.isArray(rows))throw Error('rakuten_search_invalid_shape');
   return rows.map(row=>{const i=row?.Item||row?.item||row||{};return {
-   itemCode:i.itemCode,itemName:i.itemName,price:Number(i.itemPrice),affiliateUrl:i.affiliateUrl
+   itemCode:i.itemCode,itemName:i.itemName,price:Number(i.itemPrice),affiliateUrl:i.affiliateUrl,reviewCount:i.reviewCount,reviewAverage:i.reviewAverage,affiliateRate:i.affiliateRate
   };});
  };
 }
