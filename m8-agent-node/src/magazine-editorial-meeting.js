@@ -6,7 +6,7 @@ export function planEditorialMeeting(day,slot='19:30',{history=[],observations=[
  const recent=history.filter(x=>x?.day<day).sort((a,b)=>b.day.localeCompare(a.day)).slice(0,6);
  const candidates=Array.from({length:3},(_,i)=>{
   const sourceDay=new Date(base+i*86400000).toISOString().slice(0,10);
-  const issue=planMagazineIssue(sourceDay,slot);
+  const issue=planMagazineIssue(sourceDay,slot==='12:30'?'19:30':slot);
   const repeats=recent.filter(x=>x.topicId===issue.topicId).length;
   const lastIndex=recent.findIndex(x=>x.topicId===issue.topicId);
   return {issue,score:100-repeats*20-(lastIndex===0?40:0),repeats,lastIndex};
