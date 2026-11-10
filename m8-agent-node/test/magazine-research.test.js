@@ -21,3 +21,15 @@ test('Rakuten adapter normalizes official response and does not retry 429',async
  await assert.rejects(limited('x'),/rakuten_search_http_429/);
  assert.equal(calls,2);
 });
+
+test('editorial search paces consecutive calls and refuses further calls after 429',async()=>{
+ const env={RAKUTEN_APPLICATION_ID:'app',RAKUTEN_ACCESS_KEY:'key',RAKUTEN_AFFILIATE_ID:'affiliate'};
+ let calls=0;const delays=[];
+ const search=createRakutenEditorialSearch({env,sleep:async ms=>{delays.push(ms);},fetchImpl:async()=>{
+  calls++;return calls===1?{ok:true,json:async()=>({Items:[]})}:{ok:false,status:429,headers:{get:()=> '60'}};
+ }});
+ await search('first');
+ await assert.rejects(search('second'),e=>e.message==='rakuten_search_http_429'&&e.searchNumber===2&&e.retryAfter==='60');
+ await assert.rejects(search('third'),/rakuten_search_http_429/);
+ assert.equal(calls,2);assert.deepEqual(delays,[2000]);
+});
