@@ -9,5 +9,7 @@ try{
   await new Promise(resolve=>setTimeout(resolve,2000));
   result=attachRankingEvidence(result,await createRakutenRankingSearch()());
  }
- console.log(JSON.stringify({...result,writerBrief:result.selected?buildWriterBrief({...result.selected.issue,candidates:[result.selected.product]}):null},null,2));
+ const json=JSON.stringify({...result,writerBrief:result.selected?buildWriterBrief({...result.selected.issue,candidates:[result.selected.product]}):null},null,2);
+ // ASCII JSON escapes preserve Japanese across Windows PowerShell native stdout decoding.
+ console.log(json.replace(/[\u007f-\uffff]/g,ch=>'\\u'+ch.charCodeAt(0).toString(16).padStart(4,'0')));
 }catch(e){console.error(JSON.stringify({status:'failed',reason:/^(?:rakuten_search|ranking)_http_\d+$|^rakuten_credentials_missing$/.test(e.message)?e.message:'opportunity_scan_failed',searchNumber:e.searchNumber??null,retryAfter:e.retryAfter??null}));process.exitCode=1;}
