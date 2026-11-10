@@ -1,14 +1,16 @@
 // Opportunity discovery MVP: search all three editorial lanes before choosing a topic.
 // Scores are heuristic proxies, not sales, demand forecasts or profit estimates.
 import {planMagazineIssue} from './magazine-editorial.js';
+import {seasonalMagazineIssues} from './magazine-seasonal-lanes.js';
 import {matchEditorialProducts} from './magazine-product-preview.js';
-export async function discoverRevenueOpportunity(day,slot,{search,history=[]}={}){
+export async function discoverRevenueOpportunity(day,slot,{search,history=[],includeSeasonal=false}={}){
  if(typeof search!=='function')throw Error('search_adapter_required');
  const base=Date.parse(day+'T00:00:00Z');
  if(!Number.isFinite(base))throw Error('invalid_issue_date');
  const opportunities=[];
- for(let i=0;i<3;i++){
-  const issue=planMagazineIssue(new Date(base+i*86400000).toISOString().slice(0,10),slot);
+ const issues=Array.from({length:3},(_,i)=>planMagazineIssue(new Date(base+i*86400000).toISOString().slice(0,10),slot));
+ if(includeSeasonal)issues.push(...seasonalMagazineIssues(day,slot));
+ for(const issue of issues){
   // Stop the entire scan on error, including 429; do not rank partial market results.
   const items=await search(issue.researchKeyword);
   const matches=matchEditorialProducts(issue,items);
