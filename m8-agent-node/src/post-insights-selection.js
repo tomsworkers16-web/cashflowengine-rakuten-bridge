@@ -1,4 +1,4 @@
-// Refresh selected recent revenue posts after their publication day.
+// Refresh all yesterday's posts before older revenue posts.
 // Posts can accumulate views for several days; daily-only snapshots bias tests.
 export function selectPostsForInsights(published, targetDay, {maxPosts=8,lookbackDays=7}={}){
  const target=Date.parse(targetDay+'T00:00:00+09:00');
@@ -17,13 +17,12 @@ export function selectPostsForInsights(published, targetDay, {maxPosts=8,lookbac
  const entries=[...newest.values()];
  const current=entries.filter(p=>p.jstDate===targetDay)
    .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
- const historical=entries.filter(p=>p.jstDate!==targetDay&&p.meta?.role==='revenue')
+ // Reserve the next-day snapshot for every role, not only revenue.
+ const yesterday=entries.filter(p=>p.jstDate===new Date(target-86400000+9*3600000).toISOString().slice(0,10))
+   .sort((a,b)=>String(b.at||'').localeCompare(String(a.at||'')));
+ const historical=entries.filter(p=>p.jstDate!==targetDay&&!yesterday.some(y=>y.id===p.id)&&p.meta?.role==='revenue')
    .sort((a,b)=>String(b.jstDate).localeCompare(String(a.jstDate))||
      String(b.at||'').localeCompare(String(a.at||'')));
- // Revenue attribution remains unknown, but experiment coverage should
- // not be starved by today's non-commercial posts under the API call cap.
- const currentRevenue=current.filter(p=>p.meta?.role==='revenue');
- const currentOther=current.filter(p=>p.meta?.role!=='revenue');
- return [...currentRevenue,...historical,...currentOther]
+ return [...yesterday,...current,...historical]
    .slice(0,Math.max(0,Math.min(12,maxPosts)));
 }
