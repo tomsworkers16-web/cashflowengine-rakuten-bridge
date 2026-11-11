@@ -31,3 +31,11 @@ node src/preview-magazine-fusion-creatives.js $snapshot fixtures/magazine-demand
 - 外部情報収集はまだ半自動の資料登録。記事の存在を需要の強さと解釈しない。
 - 原稿はユーザー向けの仮説であり、読者がクリックするかは未計測。
 - 記事の引用・コピーはしない。
+
+## 簡易レビュー表示の追加
+M8の保存済みスナップショットと既存の外部記事根拠を使い、追跡URLをコンソールに表示せず、2案の本文・文字数・相互比較条件・公開前チェックを確認する：
+```powershell
+$snapshot = Join-Path $env:USERPROFILE "Documents\CashFlowEngine\Snapshots\cfe-products-20261111-010109.json"
+node src/preview-magazine-fusion-creatives.js $snapshot fixtures/magazine-demand-evidence-20261111.json --summary
+```
+`manual_editorial_review_required` は公開許可ではない。PR表記・URL・500文字はプログラム上の検査のみ。現実の投稿前に、リンク遷移先・現在価格・送料・仕様・自然な文章・未検証の効果主張を確認する。実際の投稿スロットには既存のautoPostが動いているため、時刻を確定するだけで勝手に追加投稿しない。比較は投稿前の割当管理と実績記録が整ってから開始する。
