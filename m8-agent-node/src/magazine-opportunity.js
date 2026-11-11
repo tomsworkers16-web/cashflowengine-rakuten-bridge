@@ -3,12 +3,13 @@
 import {planMagazineIssue} from './magazine-editorial.js';
 import {seasonalMagazineIssues} from './magazine-seasonal-lanes.js';
 import {matchEditorialProducts} from './magazine-product-preview.js';
+import {demandEvidenceByTopic} from './magazine-demand-evidence.js';
 // Price bands are experimental purchase-friction proxies, not measured conversion rates.
 export function turnoverProxy(price,reviewProxy,ratingProxy){
  const affordability=price<=3000?30:price<=5000?20:price<=10000?10:0;
  return affordability+reviewProxy+ratingProxy;
 }
-export async function discoverRevenueOpportunity(day,slot,{search,history=[],includeSeasonal=false}={}){
+export async function discoverRevenueOpportunity(day,slot,{search,history=[],includeSeasonal=false,demandSignals=[]}={}){
  if(typeof search!=='function')throw Error('search_adapter_required');
  const base=Date.parse(day+'T00:00:00Z');
  if(!Number.isFinite(base))throw Error('invalid_issue_date');
@@ -36,8 +37,11 @@ export async function discoverRevenueOpportunity(day,slot,{search,history=[],inc
   opportunities.push({topicId:issue.topicId,keyword:issue.researchKeyword,title:issue.title,issue:{...issue,day},candidateCount:scored.length,
    product:scored[0]||null,turnoverProduct:[...scored].sort((a,b)=>b.turnoverScore-a.turnoverScore)[0]||null,score:scored.length?scored[0].score+Math.min(10,scored.length)-repeats*5:null});
  }
+ const demandEvidence=demandEvidenceByTopic(demandSignals,{day});
+ const fusedOpportunities=opportunities.map(o=>({...o,demandEvidence:demandEvidence.topics[o.topicId]||null,fusedScore:o.score===null?null:o.score+(demandEvidence.topics[o.topicId]?.supportScore||0)}));
+ const fusedRanked=fusedOpportunities.filter(x=>x.product).sort((a,b)=>b.fusedScore-a.fusedScore);
  const ranked=opportunities.filter(x=>x.product).sort((a,b)=>b.score-a.score);
  const turnover=[...ranked].sort((a,b)=>b.turnoverProduct.turnoverScore-a.turnoverProduct.turnoverScore)[0]||null;
- return {strategyCandidates:{rewardOriented:ranked[0]||null,turnoverOriented:turnover?{topicId:turnover.topicId,title:turnover.title,product:turnover.turnoverProduct}:null},turnoverEvidence:'price_band_and_review_proxy_not_measured_conversion',status:ranked.length?'opportunity_preview':'no_eligible_product',selected:ranked[0]||null,opportunities,
+ return {fusion:{status:demandSignals.length?'evidence_preview':'no_external_evidence',sourcesAccepted:demandEvidence.accepted,sourcesRejected:demandEvidence.rejected,rejections:demandEvidence.rejections,selected:fusedRanked[0]||null,opportunities:fusedOpportunities,scoreMeaning:'listing_proxy_plus_capped_source_corroboration_not_sales',publicationAllowed:false},strategyCandidates:{rewardOriented:ranked[0]||null,turnoverOriented:turnover?{topicId:turnover.topicId,title:turnover.title,product:turnover.turnoverProduct}:null},turnoverEvidence:'price_band_and_review_proxy_not_measured_conversion',status:ranked.length?'opportunity_preview':'no_eligible_product',selected:ranked[0]||null,opportunities,
   evidence:'listing_review_and_reward_proxies_not_sales',publicationAllowed:false};
 }
