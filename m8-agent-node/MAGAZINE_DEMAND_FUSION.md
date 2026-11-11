@@ -34,7 +34,7 @@
 公開、投稿、本番運用、mainへの統合はオーナー事前承認が必要。
 
 ## 初回の現実の情報源による非公開パイロット
-`fixtures/magazine-demand-evidence-20261111.json` に2026-11-11に閲覧した3出典のURL・主題・読者ニーズを保存。いずれも article タイプで独立ドメイン3件のため、暫定裏付け加点は+6（3-1ドメイン×3）、異なる情報源タイプの追加点は0。単に水切りラック記事が3件あるという事実であって検索量・販売量の裏付けではない。
+`fixtures/magazine-demand-evidence-20261111.json` に2026-11-11に閲覧を確認できた2出典のURL・主題・読者ニーズを保存。いずれも article タイプで独立ドメイン2件のため、暫定裏付け加点は+3（2-1ドメイン×3）、異なる情報源タイプの追加点は0。単に水切りラック記事が2件あるという事実であって検索量・販売量の裏付けではない。
 
 既存M8の保存データを使う場合（PR #100のworktreeにて）：
 ```powershell
@@ -42,3 +42,7 @@ $snapshot = Join-Path $env:USERPROFILE 'Documents\CashFlowEngine\Snapshots\cfe-p
 node src/preview-magazine-demand-fusion.js $snapshot fixtures/magazine-demand-evidence-20261111.json
 ```
 結果は baseline と fusion を分けて表示。ソース数と却下件数も含む。発信・取得API呼び出しなし。
+
+## 2026-11-11 補足検証
+3番目の出典は公開ページの取得に失敗したため、初回検証から除外した。2件の掲載記事は「読者が抱える課題・競合コンテンツの存在」の参考になるが、独立した**購買需要**の裏付けではない。+3点は実験用の暫定加点であり、成果改善を予測しない。
+以前のM8実機ログにおける候補先頭スコアは kitchen-cleanup=80、storage-flow≈76.55、winter-warmth=75.8、winter-cleaning≈71.42、washbasin=55.9。**当時と同一の商品候補・同一の採点条件**であれば、kitchen-cleanupの融合スコアは83で、トップジャンルは変更しないと見込まれる。ただし、これは手元にある先頭候補の数値からの計算であり、M8の全99候補スナップショットの融合結果をまだ実行していない。実機でのオフライン再評価が必要。
