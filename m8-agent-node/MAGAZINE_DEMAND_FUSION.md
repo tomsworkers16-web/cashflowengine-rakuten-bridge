@@ -32,3 +32,13 @@
 ## 次の段階
 最初は実際に閲覧可能な記事など数件でsource URLと観測日を手動検証→同じ商品データで融合候補と既存候補を比べる→商品・投稿記事・時間帯を調整した小規模比較実験。実績を集めた後に外部シグナルの採点を再調整し、無効なら廃止も検討。
 公開、投稿、本番運用、mainへの統合はオーナー事前承認が必要。
+
+## 初回の現実の情報源による非公開パイロット
+`fixtures/magazine-demand-evidence-20261111.json` に2026-11-11に閲覧した3出典のURL・主題・読者ニーズを保存。いずれも article タイプで独立ドメイン3件のため、暫定裏付け加点は+6（3-1ドメイン×3）、異なる情報源タイプの追加点は0。単に水切りラック記事が3件あるという事実であって検索量・販売量の裏付けではない。
+
+既存M8の保存データを使う場合（PR #100のworktreeにて）：
+```powershell
+$snapshot = Join-Path $env:USERPROFILE 'Documents\CashFlowEngine\Snapshots\cfe-products-20261111-010109.json'
+node src/preview-magazine-demand-fusion.js $snapshot fixtures/magazine-demand-evidence-20261111.json
+```
+結果は baseline と fusion を分けて表示。ソース数と却下件数も含む。発信・取得API呼び出しなし。
