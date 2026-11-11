@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {summarizeFusionExperiment} from '../src/magazine-fusion-experiment.js';
 const row=(postId,arm,slot='12:30')=>({postId,jstDate:'2026-11-11',slot,arm,itemCode:'shop:123',topicId:'kitchen-cleanup'});
 test('two-arm offline report keeps unknown attribution and excludes missing views',()=>{
- const assignments=[row('101','baseline'),row('102','fusion'),row('103','baseline','19:30')];
- const posts=assignments.map((x,i)=>({id:x.postId,jstDate:x.jstDate,slot:x.slot,at:'2026-11-11T12:30:00+09:00',text:'水切りについて',meta:{role:'revenue'}}));
- const reports=[{generatedAt:'2026-11-12T12:30:00+09:00',threadsInsights:{posts:[{id:'101',metrics:{views:100}},{id:'102',metrics:{views:160}}]}}];
- const result=summarizeFusionExperiment(assignments,posts,reports,{targetDay:'2026-11-12'});
+ const assignments=[row('101','baseline'),{...row('102','fusion'),jstDate:'2026-11-12'},row('103','baseline','19:30')];
+ const posts=assignments.map((x,i)=>({id:x.postId,jstDate:x.jstDate,slot:x.slot,at:x.jstDate+'T12:30:00+09:00',text:'水切りについて',meta:{role:'revenue'}}));
+ const reports=[{generatedAt:'2026-11-12T12:30:00+09:00',threadsInsights:{posts:[{id:'101',metrics:{views:100}}]}},{generatedAt:'2026-11-13T12:30:00+09:00',threadsInsights:{posts:[{id:'102',metrics:{views:160}}]}}];
+ const result=summarizeFusionExperiment(assignments,posts,reports,{targetDay:'2026-11-13'});
  assert.equal(result.groups.find(x=>x.arm==='baseline'&&x.slot==='12:30').averageViewsNear24h,100);
  assert.equal(result.groups.find(x=>x.arm==='fusion'&&x.slot==='12:30').averageViewsNear24h,160);
  assert.equal(result.groups.find(x=>x.arm==='baseline'&&x.slot==='19:30').missingViews,1);
