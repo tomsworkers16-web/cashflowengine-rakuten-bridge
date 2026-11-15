@@ -95,3 +95,40 @@ node src/run-editorial-article-workflow.js .\article-workflow-input.json
 node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.test.js
 ```
 ローカルNode本体でのテストやM8実機での起動は未実施。現時点ではGitHub保存と関数単体の論理確認まで。
+
+
+## 2026-11-16: 調査済みデータからの自動起稿と安全な再生成
+- `src/editorial-research-drafter.js` を追加。既存の `classifyTheme` を再利用し、収納・台所布製品・掃除・食品保存・デジタル等のテーマ別に、**商品に関する性能を断定しない**購入前のチェック観点を生成する。
+- `researchByItemCode` に調査済みの事実を渡すと、`draftsByItemCode` に下書きがなくても、下書き→品質ゲート→記事組立までオフラインで処理。
+- 不合格ドラフトは、同じ調査情報がある場合に限り最大1回、事実を補完せずテンプレート再生成→再採点。架空体験、未検証性能、商品主張の根拠欠如、PR表記漏れは**自動修正しない**。
+- `autoRevise:false` で再生成を無効化できる。
+- `npm run editorial-tests` は品質ゲート・候補接続・自動起稿の個別テスト。`npm run editorial-articles -- .\\article-workflow-input.json` はローカル審査用。
+- `ranking` に入るのは `[{itemCode,itemName,rank,price,hasAffiliateUrl:true}]` 。新規 `researchByItemCode` には商品ごとの以下の形式を使用する。
+
+```json
+{
+  "researchByItemCode": {
+    "shop:001": {
+      "itemCode": "shop:001",
+      "affiliateUrl": "https://example.com/affiliate",
+      "rights": {"noMedia": true},
+      "subjectContext": "賃貸住宅の狭い台所",
+      "facts": [
+        {
+          "id": "size",
+          "claim": "販売元が公表した外寸",
+          "sourceUrl": "https://example.com/item",
+          "checkedAt": "2026-11-16"
+        }
+      ]
+    }
+  }
+}
+```
+これは `ranking` と同一オブジェクトに含める。サンプルURLは架空の商品検証情報であり実運用には使わない。
+
+### 現時点の厳密な限界
+- これは**証拠付き入力に基づくルール型の自動起稿／再生成**であり、ChatGPT/Claude等のLLMをAPI経由で呼ぶ実装ではない。商品情報のWeb取得や商品ページとの照合もまだ行わない。
+- URLや確認日は入力値の形式のみチェックし、実際のページ内容の存在・信頼性・正確性は確認しない。自動合格を事実検証完了と誤認しないこと。
+- 既存 `enrichShortlist` は価格・レビューなどを楽天公式APIから取得できるが、これだけでは製品寸法・適合条件等の深い記事を書く根拠として不足する。商品詳細の裏取りを追加するまでは保留する。
+- 実際のM8へのデプロイ・本番接続・公開・mainマージ・実機Nodeテストはいずれも**未実施**。公開はオーナーの事前承認が必要。
