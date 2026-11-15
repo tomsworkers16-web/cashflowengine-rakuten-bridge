@@ -29,7 +29,7 @@
     "threads-hook-diagnostics": "node src/report-threads-hooks.js",
     "threads-age-matched": "node src/report-threads-age-matched.js",
     "editorial-articles": "node src/run-editorial-article-workflow.js",
-    "editorial-tests": "node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.test.js test/editorial-research-drafter.test.js"
+    "editorial-tests": "node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.test.js test/editorial-research-drafter.test.js test/editorial-rakuten-evidence.test.js test/editorial-llm-adapter.test.js test/editorial-ai-workflow.test.js"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
