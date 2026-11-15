@@ -17,7 +17,8 @@ test('missing writer is explicit; unsupported claims and duplicate lines rejecte
 
 test('conversation policy travels to writer and excessive questions are warnings, not proof of quality',async()=>{
  const r=await draftMagazineIssue('2026-11-11','19:30',{search:async()=>[],writer:async b=>{
-  assert.equal(b.voicePolicy.version,'conversation-v1');
+  assert.equal(b.voicePolicy.version,'reader-discovery-v2');
+  assert.ok(b.instructions.some(x=>x.includes('具体的な発見')));
   assert.ok(b.voicePolicy.approaches.length>=4);
   return '収納が足りない？\n取り出すときは？\n戻すときは？\n棚の奥はどうですか？';
  }});
