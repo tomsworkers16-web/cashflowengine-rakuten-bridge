@@ -4,8 +4,8 @@ import {researchMagazineIssue} from './magazine-research.js';
 import {validatePublicationText} from './product-posting.js';
 export function buildWriterBrief(issue){
  return {topic:issue.title,series:issue.series,format:issue.format,
-  voicePolicy:{version:'conversation-v1',goal:'読者と会話するように、最後まで読みたくなる暮らしの記事',approaches:['共感から具体例へ','意外な発見から理由へ','読者への相談から比較へ','場面を想像して解説へ'],lengthGuidance:'短文は一つの気づき、中文は一つの選択基準、特集は具体例と理由を展開。長さは内容で決める。'},
-  instructions:['読者に役立つ読み物を自然な日本語で書く。','読者が自分の暮らしを思い浮かべる具体的な場面を入れ、会話の流れで説明する。','問いかけや冗談は必要なときだけ使う。語尾や冒頭を定型化しない。','一人語りや抽象論を避け、読者の疑問に答え、新しい視点を一つ届ける。','長くするための繰り返しは避ける。親しみやすさのために実体験を捏造しない。','架空の体験・口コミ・効果・仕様を書かない。','商品を買わなくても役立つ情報を含める。','同じ説明を繰り返さない。','通常投稿は500文字以内。広告リンクは執筆者が生成しない。'],
+  voicePolicy:{version:'reader-discovery-v2',goal:'読者に新しい気づきと具体的に役立つ判断基準を伝える暮らしの記事',approaches:['共感から具体例へ','意外な発見から理由へ','読者への相談から比較へ','場面を想像して解説へ'],lengthGuidance:'短文は一つの気づき、中文は一つの選択基準、特集は具体例と理由を展開。長さは内容で決める。'},
+  instructions:['読者に役立つ読み物を自然な日本語で書く。','読者が自分の暮らしを思い浮かべる具体的な場面を入れ、会話の流れで説明する。','問いかけや冗談は必要なときだけ使う。語尾や冒頭を定型化しない。','一人語りや抽象論を避け、読者の疑問に答え、新しい視点を一つ届ける。','長くするための繰り返しは避ける。親しみやすさのために実体験を捏造しない。','架空の体験・口コミ・効果・仕様を書かない。','商品を買わなくても役立つ情報を含める。','同じ説明を繰り返さない。','読者が既に知っている当たり前の話だけで終わらず、少なくとも1つ具体的な発見・見落としがちな確認点を示す。','記事を読んだだけで実行できる比較方法や購入前の確認方法を示す。','実証できない情報を『新発見』として創作しない。','通常投稿は500文字以内。広告リンクは執筆者が生成しない。'],
   editorialSeed:issue.text,
   evidence:(issue.candidates||[]).map(({itemCode,itemName,price})=>({itemCode,itemName,price,verifiedSpecifications:false}))};
 }
