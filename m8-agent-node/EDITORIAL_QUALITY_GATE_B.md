@@ -43,3 +43,55 @@ node src/audit-editorial-draft.js .\draft.json
 入力者が虚偽のチェック結果を与えると検出できない場合がある。URLの存在、ページ本文との一致、画像の利用許諾も自動で確認しない。
 次段階では既存の編集生成器／記事管理の入出力仕様を確定し、生成→情報ソース確認→ゲート→修正候補→再検査→オーナー承認の接続を行う。
 修正候補はAIに再執筆させられるが、根拠の創作を防ぐためソース未確認のまま不足欄を埋めて合格扱いにしてはならない。
+
+## 2026-11-16: 商品選定機能との接続
+- `src/editorial-article-workflow.js`: 既存 `buildEditorialShortlist` を呼び出して候補を選び、商品IDに一致する調査済み記事データを `evaluateEditorialDraft` へ渡す。
+- `src/run-editorial-article-workflow.js`: JSONを渡す試験用CLI。
+- `test/editorial-article-workflow.test.js`: 調査未実施・合格・商品不一致・不合格から再審査・根拠不足の5例。
+- 調査済みデータがない候補は `research_required`、不合格は `revision_required`、通過したものは `review_candidate`。いずれも `publishApproved=false`。
+- 合格記事の構造化データからMarkdown記事を組み立てる。未確認の販売実績・感想・性能等をAIが勝手に補完する処理は置かない。
+- 既存の `local-core-v2.js` のThreads自動投稿には未接続。短文SNS投稿への適用は別途仕様調整が必要（投稿上限500文字と長文記事品質基準は用途が異なる）。
+
+### 入力JSON
+```json
+{
+  "ranking": [
+    {
+      "itemCode":"shop:001",
+      "itemName":"水切りかご 収納",
+      "price":3500,
+      "rank":2,
+      "hasAffiliateUrl":true
+    }
+  ],
+  "draftsByItemCode": {
+    "shop:001": {
+      "itemCode": "shop:001",
+      "title": "水切りかごを選ぶ前に確認したいこと",
+      "reader": {"problem":"置き場所の幅が狭い","context":"二人暮らしの台所"},
+      "purchaseChecks": [
+        {"risk":"蛇口とぶつかる","howToCheck":"寸法と蛇口の可動域を測る"},
+        {"risk":"排水方向が逆","howToCheck":"シンクの位置と商品排水口の向きを確認"},
+        {"risk":"手入れが負担","howToCheck":"トレー着脱方法を比較"}
+      ],
+      "comparisonMethod":"寸法・排水方向・手入れ方法を一覧で比較する",
+      "goodFor":"設置条件に合う人",
+      "notGoodFor":"蛇口に干渉する人",
+      "verifiedFacts":[{"id":"spec","claim":"出品ページに外寸情報がある","sourceUrl":"https://example.com/spec","checkedAt":"2026-11-16"}],
+      "productClaims":[{"text":"外寸は商品ページで確認できる","factId":"spec"}],
+      "isAffiliate":true,
+      "disclosure":"【PR】",
+      "affiliateUrl":"https://example.com/affiliate",
+      "fabricatedExperience":false,
+      "unverifiedPerformance":false,
+      "mediaRightsVerified":true
+    }
+  }
+}
+```
+例のドメインはダミーであり実在商品の調査は未実施。利用時は実際の根拠が必要。
+```powershell
+node src/run-editorial-article-workflow.js .\article-workflow-input.json
+node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.test.js
+```
+ローカルNode本体でのテストやM8実機での起動は未実施。現時点ではGitHub保存と関数単体の論理確認まで。
