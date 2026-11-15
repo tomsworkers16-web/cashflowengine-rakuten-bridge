@@ -38,13 +38,15 @@ export function evaluateEditorialDraft(draft) {
   if (draft.isAffiliate !== true && draft.isAffiliate !== false) problems.push(issue('affiliate_status_unknown','広告・非広告の区分を明示する'));
   if (ad && (!hasDisclosure || !hasLink)) problems.push(issue('affiliate_label_or_url_invalid','PR表記と有効なHTTPSアフィリエイトリンクを確認する'));
   const total = Object.values(score).reduce((a,b) => a+b,0);
-  const passed = total >= 10 && score.productEvidence === 2 && score.transparentRevenue === 2 && problems.length === 0;
+  const hardBlockers = new Set(['fabricated_experience','unverified_performance','media_rights_unverified','unsupported_product_claims','affiliate_status_unknown','affiliate_label_or_url_invalid']);
+  const passed = total >= 10 && score.productEvidence === 2 && score.transparentRevenue === 2 && !problems.some(p => hardBlockers.has(p.code));
   return {
     version: 'editorial-gate-b-v1',
     score, total, maxScore: 12,
     status: passed ? 'review_candidate' : 'revision_required',
     publishApproved: false, // ALWAYS requires owner approval. Never treat score as publish permission.
     issues: problems,
+    blockingIssues: problems.filter(p => hardBlockers.has(p.code)),
     feedback: problems.map(x => x.action),
     disclaimer: 'Structure/evidence-presence audit only; linked sources, claims and media rights require independent verification.'
   };
