@@ -132,3 +132,28 @@ node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.
 - URLや確認日は入力値の形式のみチェックし、実際のページ内容の存在・信頼性・正確性は確認しない。自動合格を事実検証完了と誤認しないこと。
 - 既存 `enrichShortlist` は価格・レビューなどを楽天公式APIから取得できるが、これだけでは製品寸法・適合条件等の深い記事を書く根拠として不足する。商品詳細の裏取りを追加するまでは保留する。
 - 実際のM8へのデプロイ・本番接続・公開・mainマージ・実機Nodeテストはいずれも**未実施**。公開はオーナーの事前承認が必要。
+
+
+## 2026-11-16: 公式楽天APIと任意AI生成の接続追加（作業ブランチのみ）
+- `src/editorial-rakuten-evidence.js`: 楽天公式商品検索APIのレスポンスから、掲載商品名・価格・レビュー件数を**API回答の属性としてのみ**抽出。APIキー等を研究出力には含めない。寸法・材質・清掃条件はこれでは検証できず `needs_product_detail_research` とする。
+- `assembleEditorialResearch`: 商品ページのURL/商品ID一致、2件以上の仕様確認記録、引用文字列の存在、日付、PRリンクを検査。未確認なら `research_required`。**引用文が実際にページに存在するかは機械検証していない。**
+- `src/editorial-rakuten-research.js` と `src/run-editorial-rakuten-research.js`: 既存 `runDiscoveryProbe` → 最大2件（内部上限3件）の楽天商品詳細取得 → 調査パケットを標準出力。投稿もファイル保存もしない。楽天APIのレート制約に配慮し、商品ごとの間隔を確保。
+- `src/editorial-llm-adapter.js`: 外部から渡された `generateFn` を最大2回呼ぶための、プロバイダー非依存インターフェース。モデルが商品ID、価格の根拠、PRリンク、権利確認等を書き換えても受け付けず、指定された文章項目のみ取り込む。
+- `src/editorial-ai-workflow.js`: 検証済みとして提供された調査パケット→AI用入力→生成→品質判定→既存のMarkdown記事組み立て。AI未接続/根拠不足/品質不足の場合は記事非生成。
+- テスト追加: `editorial-rakuten-evidence.test.js` / `editorial-llm-adapter.test.js` / `editorial-ai-workflow.test.js` / `editorial-rakuten-research.test.js`。
+
+### 実機での読み取り専用確認（開発ブランチを検証環境に入れた後のみ）
+```powershell
+cd m8-agent-node
+npm run editorial-tests
+npm run editorial-rakuten-research
+```
+2つ目のコマンドは開発環境に既存の `.env` があり、楽天公式APIキーが設定済みのときだけ動作する。楽天APIへの読み取りアクセスは発生するが、投稿・課金契約・データ保存はしない。
+
+### 重要な未完了工程
+1. M8環境で `npm run editorial-tests` を実行し、全テスト結果を確認する。GitHub保存だけで「実機テスト済み」と言わない。
+2. 楽天APIの実レスポンスで候補の取得を検証。アクセス制限・戻り形式差分に対応する。
+3. 商品ページの本文と引用根拠を検証する実リサーチアダプターの実装。現在は調査済みと申告されたデータ形式の整合性のみ検査する。
+4. ChatGPT / Claude 等の実モデルを呼び出す実装は未接続。 `generateFn` は呼出し口のみで、課金・ログイン・API契約は勝手に作らない。
+5. B案型の内容を人間が実際に読んで評価し、表示回数・クリック・成約・確定報酬・実利益で検証する。
+6. main統合、M8配布、既存投稿エンジン変更、公開は全てオーナー事前承認後。
