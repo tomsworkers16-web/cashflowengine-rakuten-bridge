@@ -13,7 +13,7 @@ function decoded(s){
 function textOf(block,tag){
  const pattern=new RegExp('<(?:[\\w-]+:)?'+tag+'(?:\\s[^<>]*)?>([\\s\\S]*?)<\\/(?:[\\w-]+:)?'+tag+'\\s*>','i');
  const m=block.match(pattern);
- return m?decoded(m[1].replace(/<[^>]*>/g,'')).trim():null;
+ return m?decoded(m[1]).replace(/<[^>]*>/g,'').trim():null;
 }
 function attribute(element,name){
  const m=element.match(new RegExp("(?:\\s|^)"+name+"\\s*=\\s*([\\\"'])([^\\\"']+)\\1",'i'));
