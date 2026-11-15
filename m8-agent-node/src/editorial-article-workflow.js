@@ -35,7 +35,7 @@ function articleBody(draft) {
  * Ranking/title-only evidence never becomes verifiedFacts.
  */
 export function buildEditorialArticleWorkflow({
-  ranking, draftsByItemCode = {}, researchByItemCode = {}, max = 5
+  ranking, draftsByItemCode = {}, researchByItemCode = {}, max = 5, autoRevise = true
 } = {}) {
   const shortlist = buildEditorialShortlist(ranking, { max });
   const entries = shortlist.selected.map(candidate => {
@@ -53,16 +53,37 @@ export function buildEditorialArticleWorkflow({
       itemCode: candidate.itemCode, candidate, status: 'revision_required',
       publishApproved: false, feedback: ['itemCodeの不一致を修正する。異なる商品の根拠を流用しない']
     };
-    const audit = evaluateEditorialDraft(draft);
+    const initialAudit = evaluateEditorialDraft(draft);
+    let finalDraft = draft;
+    let audit = initialAudit;
+    let autoRevision = null;
+    // One offline correction pass only. Never rewrite a draft containing unverifiable
+    // product claims, fabricated experience, or missing affiliate disclosure.
+    const blocked = new Set(['fabricated_experience','unverified_performance',
+      'unsupported_product_claims','affiliate_label_or_url_invalid']);
+    if (autoRevise && audit.status === 'revision_required' &&
+        !audit.blockingIssues.some(i => blocked.has(i.code)) &&
+        researchByItemCode[candidate.itemCode]) {
+      const proposed = draftFromResearch(candidate, researchByItemCode[candidate.itemCode]);
+      if (proposed.draft) {
+        const reassessed = evaluateEditorialDraft(proposed.draft);
+        if (reassessed.status === 'review_candidate') {
+          finalDraft = proposed.draft;
+          audit = reassessed;
+          autoRevision = {attempted:1,method:'regenerate_from_supplied_research',
+            previousScore:initialAudit.total,result:'review_candidate'};
+        }
+      }
+    }
     return {
       itemCode: candidate.itemCode, candidate,
       status: audit.status,
       publishApproved: false,
-      audit,
-      draftOrigin: generated?.status === 'drafted' ? 'research_template' : 'provided_draft',
-      revision: audit.status === 'revision_required' ? revisionRequest(draft, audit) : null,
+      audit,autoRevision,
+      draftOrigin: finalDraft !== draft || generated?.status === 'drafted' ? 'research_template' : 'provided_draft',
+      revision: audit.status === 'revision_required' ? revisionRequest(finalDraft, audit) : null,
       // Render only a qualified draft; the audit is structural, not external verification.
-      article: audit.status === 'review_candidate' ? articleBody(draft) : null
+      article: audit.status === 'review_candidate' ? articleBody(finalDraft) : null
     };
   });
   return {
