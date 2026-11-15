@@ -1,6 +1,7 @@
 // Restricted RSS 2.0 / Atom XML metadata parser. Not a general-purpose XML reader.
 // Reject DTD/entities, process only titles and links, never retain article bodies.
 import {signalsFromJsonFeed} from './magazine-json-feed-demand.js';
+import {normalizeDemandSignals} from './magazine-demand-evidence.js';
 function decoded(s){
  return s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1')
   .replace(/&#(x[0-9a-f]+|[0-9]+);|&(amp|lt|gt|quot|apos);/gi,(m,n,named)=>{
@@ -15,7 +16,7 @@ function textOf(block,tag){
  return m?decoded(m[1].replace(/<[^>]*>/g,'')).trim():null;
 }
 function attribute(element,name){
- const m=element.match(new RegExp('(?:\\s|^)'+name+'\\s*=\\s*(["\\'])([^"\\']+)\\1','i'));
+ const m=element.match(new RegExp("(?:\\s|^)"+name+"\\s*=\\s*([\\\"'])([^\\\"']+)\\1",'i'));
  return m?.[2]||null;
 }
 function atomUrl(block){
@@ -66,6 +67,7 @@ export async function collectXmlFeedDemand({feeds=[],day,fetchImpl=fetch,now=()=
    diagnostics.push({domain:url?.hostname||'invalid',status:'skipped',reason:/^feed_/.test(String(e.message))?e.message:'fetch_failed'});
   }
  }
- return {status:'offline_approval_required',signals:rows,diagnostics,fetchedFeedCount:diagnostics.filter(x=>x.status==='retrieved').length,
+ const normalized=normalizeDemandSignals(rows,{day});
+ return {status:'offline_approval_required',signals:normalized.signals.map(({sourceDomain,trafficVerified,sourceNote,...rest})=>rest),accepted:normalized.signals.length,rejected:normalized.rejections.length,diagnostics,fetchedFeedCount:diagnostics.filter(x=>x.status==='retrieved').length,
   automaticPost:false,publicationAllowed:false,caution:'RSS/Atom metadata only; no measured demand or verified product claims.'};
 }
