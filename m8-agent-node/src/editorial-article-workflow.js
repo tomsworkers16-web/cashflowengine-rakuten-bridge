@@ -3,6 +3,7 @@
 import { buildEditorialShortlist } from './editorial-shortlist.js';
 import { evaluateEditorialDraft, revisionRequest } from './editorial-quality-gate.js';
 import { draftFromResearch } from './editorial-research-drafter.js';
+import { assembleEditorialResearch } from './editorial-rakuten-evidence.js';
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 function safeParagraph(value) { return text(value).replace(/\r\n?/g, '\n'); }
@@ -35,17 +36,22 @@ function articleBody(draft) {
  * Ranking/title-only evidence never becomes verifiedFacts.
  */
 export function buildEditorialArticleWorkflow({
-  ranking, draftsByItemCode = {}, researchByItemCode = {}, max = 5, autoRevise = true
+  ranking, draftsByItemCode = {}, researchByItemCode = {}, apiEvidenceByItemCode = {}, productPageReviewsByItemCode = {}, max = 5, autoRevise = true
 } = {}) {
   const shortlist = buildEditorialShortlist(ranking, { max });
   const entries = shortlist.selected.map(candidate => {
+    const suppliedResearch = researchByItemCode[candidate.itemCode];
+    const assembled = !suppliedResearch && apiEvidenceByItemCode[candidate.itemCode]
+      ? assembleEditorialResearch(candidate, apiEvidenceByItemCode[candidate.itemCode],
+          productPageReviewsByItemCode[candidate.itemCode]) : null;
+    const effectiveResearch = suppliedResearch || assembled?.research;
     const generated = !draftsByItemCode[candidate.itemCode]
-      ? draftFromResearch(candidate, researchByItemCode[candidate.itemCode]) : null;
+      ? draftFromResearch(candidate, effectiveResearch) : null;
     const draft = draftsByItemCode[candidate.itemCode] || generated?.draft;
     if (!draft) return {
       itemCode: candidate.itemCode, candidate, status: 'research_required',
       publishApproved: false,
-      researchReason: generated?.reason || 'research_not_provided',
+      researchReason: assembled?.reason || generated?.reason || 'research_not_provided',
       feedback: ['楽天ランキング・商品名だけでは記事の根拠不足。商品仕様・確認日・出典・購入前の注意点を調査してドラフトを作成する']
     };
     // Guard against accidentally applying research about a different product.
@@ -63,8 +69,8 @@ export function buildEditorialArticleWorkflow({
       'unsupported_product_claims','affiliate_label_or_url_invalid']);
     if (autoRevise && audit.status === 'revision_required' &&
         !audit.blockingIssues.some(i => blocked.has(i.code)) &&
-        researchByItemCode[candidate.itemCode]) {
-      const proposed = draftFromResearch(candidate, researchByItemCode[candidate.itemCode]);
+        effectiveResearch) {
+      const proposed = draftFromResearch(candidate, effectiveResearch);
       if (proposed.draft) {
         const reassessed = evaluateEditorialDraft(proposed.draft);
         if (reassessed.status === 'review_candidate') {
