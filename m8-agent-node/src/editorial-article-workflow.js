@@ -1,0 +1,91 @@
+// Offline article workflow connecting the existing Rakuten editorial shortlist to the B quality gate.
+// No network calls, external publishing, or automatic promotion to production.
+import { buildEditorialShortlist } from './editorial-shortlist.js';
+import { evaluateEditorialDraft, revisionRequest } from './editorial-quality-gate.js';
+
+function text(value) { return typeof value === 'string' ? value.trim() : ''; }
+function safeParagraph(value) { return text(value).replace(/\r\n?/g, '\n'); }
+function articleBody(draft) {
+  const checks = Array.isArray(draft.purchaseChecks) ? draft.purchaseChecks : [];
+  const facts = Array.isArray(draft.verifiedFacts) ? draft.verifiedFacts : [];
+  const sections = [
+    '# ' + text(draft.title || draft.reader?.problem),
+    '## こんな悩みがある方へ\n' + safeParagraph(draft.reader?.problem) + '\n' + safeParagraph(draft.reader?.context),
+    '## 購入前に確認したいこと\n' + checks.map((c, i) =>
+      (i + 1) + '. **' + text(c.risk) + '**：' + text(c.howToCheck)
+    ).join('\n'),
+    '## 比較するときの手順\n' + safeParagraph(draft.comparisonMethod),
+    '## 向く人・向かない人\n向く人：' + safeParagraph(draft.goodFor) +
+      '\n向かない人：' + safeParagraph(draft.notGoodFor),
+    '## 商品情報と確認元\n' + facts.map(f =>
+      '- ' + text(f.claim) + '（確認日：' + text(f.checkedAt) + '、出典：' + text(f.sourceUrl) + '）'
+    ).join('\n')
+  ];
+  if (draft.isAffiliate === true) {
+    sections.push('## 商品ページ\n' + text(draft.disclosure) + '\n' + text(draft.affiliateUrl));
+  }
+  return sections.join('\n\n') + '\n';
+}
+
+/**
+ * Input:
+ * { ranking: Rakuten ranking candidate array,
+ *   draftsByItemCode: { [itemCode]: { ...quality-gate schema, itemCode, title } } }
+ * Ranking/title-only evidence never becomes verifiedFacts.
+ */
+export function buildEditorialArticleWorkflow({
+  ranking, draftsByItemCode = {}, max = 5
+} = {}) {
+  const shortlist = buildEditorialShortlist(ranking, { max });
+  const entries = shortlist.selected.map(candidate => {
+    const draft = draftsByItemCode[candidate.itemCode];
+    if (!draft) return {
+      itemCode: candidate.itemCode, candidate, status: 'research_required',
+      publishApproved: false,
+      feedback: ['楽天ランキング・商品名だけでは記事の根拠不足。商品仕様・確認日・出典・購入前の注意点を調査してドラフトを作成する']
+    };
+    // Guard against accidentally applying research about a different product.
+    if (draft.itemCode !== candidate.itemCode) return {
+      itemCode: candidate.itemCode, candidate, status: 'revision_required',
+      publishApproved: false, feedback: ['itemCodeの不一致を修正する。異なる商品の根拠を流用しない']
+    };
+    const audit = evaluateEditorialDraft(draft);
+    return {
+      itemCode: candidate.itemCode, candidate,
+      status: audit.status,
+      publishApproved: false,
+      audit,
+      revision: audit.status === 'revision_required' ? revisionRequest(draft, audit) : null,
+      // Render only a qualified draft; the audit is structural, not external verification.
+      article: audit.status === 'review_candidate' ? articleBody(draft) : null
+    };
+  });
+  return {
+    version: 'editorial-article-workflow-v1',
+    mode: 'offline_review_only',
+    scanned: shortlist.scanned,
+    eligible: shortlist.eligible,
+    entries,
+    summary: {
+      researchRequired: entries.filter(x => x.status === 'research_required').length,
+      revisionRequired: entries.filter(x => x.status === 'revision_required').length,
+      reviewCandidates: entries.filter(x => x.status === 'review_candidate').length,
+      published: 0
+    }
+  };
+}
+
+/**
+ * Recheck a revised draft for the same shortlist candidate.
+ * Resubmission is never publication; it reruns the full audit from scratch.
+ */
+export function recheckEditorialArticle(candidate, correctedDraft) {
+  if (!candidate?.itemCode) throw new TypeError('candidate_item_code_required');
+  return buildEditorialArticleWorkflow({
+    ranking: [{
+      itemCode: candidate.itemCode, itemName: candidate.itemName, price: candidate.price,
+      rank: candidate.rank, genreId: candidate.genreId, hasAffiliateUrl: true
+    }],
+    draftsByItemCode: { [candidate.itemCode]: correctedDraft }, max: 1
+  });
+}
