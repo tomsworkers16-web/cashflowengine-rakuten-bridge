@@ -94,3 +94,39 @@ export function recheckEditorialArticle(candidate, correctedDraft) {
     draftsByItemCode: { [candidate.itemCode]: correctedDraft }, max: 1
   });
 }
+
+/**
+ * Safe one-step regeneration from *the same provided research*.
+ * Never fabricates missing evidence or auto-approves the resulting article.
+ * This is template-based correction, not a live LLM rewrite.
+ */
+export function reviseEditorialArticleFromResearch(candidate, previousDraft, research) {
+  if (previousDraft?.itemCode !== candidate?.itemCode) {
+    return { status:'revision_required', publishApproved:false,
+      reason:'candidate_draft_identity_mismatch' };
+  }
+  const initial = evaluateEditorialDraft(previousDraft);
+  if (initial.status === 'review_candidate') {
+    return { status:'review_candidate', publishApproved:false,
+      reason:'already_qualified', audit:initial };
+  }
+  const unsafe = ['fabricated_experience','unverified_performance','unsupported_product_claims','affiliate_label_or_url_invalid'];
+  if (initial.blockingIssues.some(i => unsafe.includes(i.code))) {
+    return { status:'revision_required', publishApproved:false, reason:'manual_evidence_review_required',
+      audit:initial, revision:revisionRequest(previousDraft, initial) };
+  }
+  const next = draftFromResearch(candidate, research);
+  if (!next.draft) {
+    return { status:'research_required', publishApproved:false,
+      reason:next.reason, audit:initial };
+  }
+  const result = recheckEditorialArticle(candidate, next.draft);
+  const entry = result.entries[0];
+  return {
+    ...entry,
+    autoRevision: 'regenerated_from_sourced_research_once',
+    previousScore: initial.total,
+    publishApproved:false,
+    recheckCount:1
+  };
+}
