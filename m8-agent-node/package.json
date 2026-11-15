@@ -27,7 +27,9 @@
     "probe-discovery": "node --env-file=.env src/probe-rakuten-discovery.js",
     "post-product-evidence": "node src/report-post-product-evidence.js",
     "threads-hook-diagnostics": "node src/report-threads-hooks.js",
-    "threads-age-matched": "node src/report-threads-age-matched.js"
+    "threads-age-matched": "node src/report-threads-age-matched.js",
+    "editorial-articles": "node src/run-editorial-article-workflow.js",
+    "editorial-tests": "node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.test.js test/editorial-research-drafter.test.js"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
