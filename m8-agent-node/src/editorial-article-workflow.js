@@ -2,6 +2,7 @@
 // No network calls, external publishing, or automatic promotion to production.
 import { buildEditorialShortlist } from './editorial-shortlist.js';
 import { evaluateEditorialDraft, revisionRequest } from './editorial-quality-gate.js';
+import { draftFromResearch } from './editorial-research-drafter.js';
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 function safeParagraph(value) { return text(value).replace(/\r\n?/g, '\n'); }
@@ -34,14 +35,17 @@ function articleBody(draft) {
  * Ranking/title-only evidence never becomes verifiedFacts.
  */
 export function buildEditorialArticleWorkflow({
-  ranking, draftsByItemCode = {}, max = 5
+  ranking, draftsByItemCode = {}, researchByItemCode = {}, max = 5
 } = {}) {
   const shortlist = buildEditorialShortlist(ranking, { max });
   const entries = shortlist.selected.map(candidate => {
-    const draft = draftsByItemCode[candidate.itemCode];
+    const generated = !draftsByItemCode[candidate.itemCode]
+      ? draftFromResearch(candidate, researchByItemCode[candidate.itemCode]) : null;
+    const draft = draftsByItemCode[candidate.itemCode] || generated?.draft;
     if (!draft) return {
       itemCode: candidate.itemCode, candidate, status: 'research_required',
       publishApproved: false,
+      researchReason: generated?.reason || 'research_not_provided',
       feedback: ['楽天ランキング・商品名だけでは記事の根拠不足。商品仕様・確認日・出典・購入前の注意点を調査してドラフトを作成する']
     };
     // Guard against accidentally applying research about a different product.
@@ -55,6 +59,7 @@ export function buildEditorialArticleWorkflow({
       status: audit.status,
       publishApproved: false,
       audit,
+      draftOrigin: generated?.status === 'drafted' ? 'research_template' : 'provided_draft',
       revision: audit.status === 'revision_required' ? revisionRequest(draft, audit) : null,
       // Render only a qualified draft; the audit is structural, not external verification.
       article: audit.status === 'review_candidate' ? articleBody(draft) : null
