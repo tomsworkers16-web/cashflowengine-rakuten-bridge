@@ -24,7 +24,7 @@ export async function runVacuumEvidence({
  catch {return {status:'research_required',reason:'product_page_fetch_failed',published:0};}
  const review=analyzeVacuumContainerPage(page.html);
  const sizeChart=extractVacuumSizeChart(page.html);
- const guide=buildVacuumBuyerReviewDraft(review,{sourceUrl:page.url,checkedAt});
+ const guide=buildVacuumBuyerReviewDraft(review,{sourceUrl:page.url,checkedAt,sizeChart});
  return {
   itemCode:ITEM,productPageUrl:page.url,
   ...review,
