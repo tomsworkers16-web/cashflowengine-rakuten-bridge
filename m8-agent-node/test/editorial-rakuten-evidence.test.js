@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rakutenEditorialEvidence, fetchRakutenEditorialEvidence, assembleEditorialResearch }
+import { rakutenEditorialEvidence, fetchRakutenEditorialEvidence, assembleEditorialResearch, canonicalRakutenItemUrl }
   from '../src/editorial-rakuten-evidence.js';
 import { buildEditorialArticleWorkflow } from '../src/editorial-article-workflow.js';
 
 const candidate={itemCode:'shop:001',itemName:'水切りかご 収納',price:3300,rank:2,hasAffiliateUrl:true};
 const apiItem={itemCode:'shop:001',itemName:'水切りかご 収納',itemPrice:3300,reviewCount:14,
-  itemUrl:'https://example.com/product',affiliateUrl:'https://example.com/affiliate'};
+  itemUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',affiliateUrl:'https://example.com/affiliate'};
 const payload={Items:[{Item:apiItem}]};
-const review=()=>({itemCode:'shop:001',reviewed:true,sourceUrl:'https://example.com/product',
+const review=()=>({itemCode:'shop:001',reviewed:true,sourceUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',
   checkedAt:'2026-11-16',specs:[
-    {id:'size',claim:'販売ページの寸法記載を確認',quote:'幅30cm',sourceUrl:'https://example.com/product',reviewed:true},
-    {id:'material',claim:'販売ページの材質記載を確認',quote:'ステンレス',sourceUrl:'https://example.com/product',reviewed:true}
+    {id:'size',claim:'販売ページの寸法記載を確認',quote:'幅30cm',sourceUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',reviewed:true},
+    {id:'material',claim:'販売ページの材質記載を確認',quote:'ステンレス',sourceUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',reviewed:true}
   ]});
 
 test('API listing provides observable fields but is not full product research',()=>{
@@ -52,8 +52,16 @@ test('explicit source review can create offline article candidate',()=>{
 });
 test('mismatched or insufficient page evidence is held',()=>{
  const e=rakutenEditorialEvidence(payload,'shop:001',{checkedAt:'2026-11-16'});
- const bad=review();bad.sourceUrl='https://example.com/unrelated';
+ const bad=review();bad.sourceUrl='https://item.rakuten.co.jp/e-kurashi/unrelated/';
  assert.equal(assembleEditorialResearch(candidate,e,bad).status,'research_required');
  const short=review();short.specs=short.specs.slice(0,1);
  assert.equal(assembleEditorialResearch(candidate,e,short).reason,'product_specs_insufficient');
+});
+
+test('Rakuten official affiliate target matches canonical item page',()=>{
+ const link='https://hb.afl.rakuten.co.jp/hgc/mock/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fe-kurashi%2Fs1u57%2F';
+ assert.equal(canonicalRakutenItemUrl(link),'https://item.rakuten.co.jp/e-kurashi/s1u57/');
+ assert.equal(canonicalRakutenItemUrl('https://evil.example/path?pc=https://item.rakuten.co.jp/e-kurashi/s1u57/'),null);
+ const e=rakutenEditorialEvidence({Items:[{Item:{...apiItem,itemUrl:link}}]},'shop:001',{checkedAt:'2026-11-16'});
+ assert.equal(assembleEditorialResearch(candidate,e,review()).status,'research_packet_ready');
 });
