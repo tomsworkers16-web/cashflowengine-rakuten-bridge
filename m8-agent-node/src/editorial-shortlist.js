@@ -17,7 +17,10 @@ const SPECIFIC_THEMES=[
  ['food_preservation',/真空保存|食品保存|フードストッカー|密閉容器|保存容器/],
  ['floor_protection',/キッチンマット|フロアマット|床保護|透明マット/]
 ];
-// Vouchers, lucky bags, and event bundles need separate editorial logic; generic\n// terms such as メガネマット must not classify the entire bundle as a floor mat.\nconst NON_PRODUCT_BUNDLES=/福袋|メガネ券|商品券|ギフトカード|抽選権|オンラインラッキードロー/u;\nconst AD_NOISE=/クーポン|OFF|送料無料|限定価格|マラソン|ポイント|楽天総合\d+位|楽天年間ランキング|先着|売り切れ|半額|超お得/u;
+// Vouchers, lucky bags, and event bundles need separate editorial logic; generic
+// terms such as メガネマット must not classify the entire bundle as a floor mat.
+const NON_PRODUCT_BUNDLES=/福袋|メガネ券|商品券|ギフトカード|抽選権|オンラインラッキードロー/u;
+const AD_NOISE=/クーポン|OFF|送料無料|限定価格|マラソン|ポイント|楽天総合\d+位|楽天年間ランキング|先着|売り切れ|半額|超お得/u;
 
 export function classifyTheme(name){
  const n=String(name??'');
