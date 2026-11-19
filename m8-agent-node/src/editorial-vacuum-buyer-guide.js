@@ -4,7 +4,7 @@ const required=[
  'pump_not_included','microwave_limit','microwave_oil_warning',
  'dishwasher_limit','pump_washing_warning','liquid_limit','gas_food_warning'
 ];
-export function buildVacuumBuyerReviewDraft(review,{sourceUrl,checkedAt}={}){
+export function buildVacuumBuyerReviewDraft(review,{sourceUrl,checkedAt,sizeChart}={}){
  const validUrl=typeof sourceUrl==='string'&&/^https:\/\/item\.rakuten\.co\.jp\/[\w-]+\/[\w-]+\/$/u.test(sourceUrl);
  const validDate=typeof checkedAt==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(checkedAt);
  const present=new Set((review?.evidence??[]).filter(e=>e.found===true&&
@@ -33,6 +33,19 @@ export function buildVacuumBuyerReviewDraft(review,{sourceUrl,checkedAt}={}){
   'ページ記載の確認日：'+checkedAt,
   'この文章は販売ページの注意事項を整理したもので、実使用や選択済みSKUの適合を検証したものではありません。使用時は最新の商品説明を確認してください。'
  ];
+ if(sizeChart?.status==='size_chart_extracted'&&sizeChart.variants?.length>=5){
+  const bySeries=new Map();
+  for(const v of sizeChart.variants){
+   if(!bySeries.has(v.series))bySeries.set(v.series,[]);
+   bySeries.get(v.series).push(v.capacityLiters+'L（'+v.widthMm+'×'+v.depthMm+'×'+v.heightMm+'mm）');
+  }
+  const at=sections.indexOf('## 購入前の最終チェック');
+  sections.splice(at,0,
+   '## 参考：販売ページにある容量・外寸の一覧',
+   '販売ページには複数の種類が掲載されています。下記は製品説明上の容量と外寸であり、今選べる販売オプションやセット内容を保証するものではありません。',
+   ...[...bySeries].map(([name,items])=>'- '+name+'：'+items.join('／')),
+   '');
+ }
  return {
   status:'editorial_review_draft',
   reviewDraft:sections.join('\n'),
