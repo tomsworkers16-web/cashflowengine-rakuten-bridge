@@ -3,7 +3,7 @@
 const THEMES=[
  ['cleaning',/換気扇|フィルター|掃除|汚れ|ブラシ|洗浄|排気口|カバー/],
  ['storage',/収納|ラック|整理|ホルダー|スタンド|置き場|水切り/],
- ['food_preservation',/保存|真空|鮮度|冷凍|密閉|タッパー|コンテナ/],
+ ['food_preservation',/保存容器|真空保存|食品保存|冷凍保存|密閉容器|タッパー|フードストッカー|保存袋|保存バッグ|真空パック/],
  ['floor_protection',/マット|床|撥水|防水/],
  ['tableware',/食器|プレート|カップ|ボウル|皿|グラス/],
  ['cooking',/調理|キッチン|包丁|鍋|フライパン|ピーラー/],
@@ -13,12 +13,15 @@ const THEMES=[
 // Specific product identity wins over generic accessory terms like 水切り and マット.
 // Otherwise the 2026-11-10 live probe misclassified a dish-drying tea towel as storage.
 const SPECIFIC_THEMES=[
+ ['apparel',/インナー|肌着|下着|パジャマ|ルームウェア|レギンス|パンツ|トップス|靴下|ソックス|Tシャツ|トレーナー|カーディガン|ブラジャー/],
+ ['food',/骨取りサバ|骨とり|冷凍食品|冷凍さば|冷凍鯖|リンツ|リンドール|チョコレート|チョコ|おせち|茶葉|桑茶|ほうじ茶|ティーパック/],
  ['kitchen_textiles',/ティータオル|キッチンタオル|キッチンクロス|ふきん|布巾|ディッシュクロス/],
  ['food_preservation',/真空保存|食品保存|フードストッカー|密閉容器|保存容器/],
  ['floor_protection',/キッチンマット|フロアマット|床保護|透明マット/]
 ];
 // Vouchers, lucky bags, and event bundles need separate editorial logic; generic
 // terms such as メガネマット must not classify the entire bundle as a floor mat.
+const NON_EDITORIAL_THEMES=new Set(['unclassified','apparel','food']);
 const NON_PRODUCT_BUNDLES=/福袋|メガネ券|商品券|ギフトカード|抽選権|オンラインラッキードロー/u;
 const AD_NOISE=/クーポン|OFF|送料無料|限定価格|マラソン|ポイント|楽天総合\d+位|楽天年間ランキング|先着|売り切れ|半額|超お得/u;
 
@@ -38,7 +41,7 @@ export function evaluateRankingCandidate(candidate){
  if(candidate?.hasAffiliateUrl!==true || NON_PRODUCT_BUNDLES.test(name))return null;
  const shop=code.split(':')[0];
  const theme=classifyTheme(name);
- const meaningful=theme!=='unclassified'&&theme!=='tableware';
+ const meaningful=!NON_EDITORIAL_THEMES.has(theme)&&theme!=='tableware';
  // This is a *research priority*, not a prediction of conversions.
  let priority=0;
  const rationale=[];
