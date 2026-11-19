@@ -217,3 +217,11 @@ M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用
 - `editorial-shortlist.js` の分類順と語彙を修正。冷凍食品・チョコ等を `food`、インナー等を `apparel` と識別する。単独の「冷凍」を保存用品と認識しない。これらはB案の具体仕様抽出が未実装なので、専用ジャンルの候補抽出から除く。
 - `src/run-editorial-genre-discovery.js` を追加。楽天のジャンル別ランキング `558944`（キッチン用品）と `215783`（日用品雑貨）で2回の読み取り専用探索をし、既存のスコアによるショートリストから非収納カテゴリだけ最大3件ずつ報告する。失敗・ゼロ件は明示し、投稿や公開はしない。
 - `test/editorial-genre-discovery.test.js` および商品名誤分類回帰テストを追加。今回の変更は開発ブランチのみ。**M8実機の結果は未確認**。今後は検証済みカテゴリから実商品ページの記述を調べ、ジャンルごとの根拠抽出パターンがない場合は公開せず保留する。
+
+
+## 2026-11-20: 換気扇フィルター実商品ページ・構成混同の安全審査
+- M8 `editorial-genre-discovery` 実測：60 tests全合格、別ジャンル5候補。対象 `starfilter:10000112` の楽天商品ページは `https://item.rakuten.co.jp/starfilter/sfsetm03/`、抽出本文3083文字。
+- 商品名で「強力マグネット+交換フィルター3枚」を確認する一方、同じページ本文にはレンジフードの機種型番・寸法照合・「既存の金属フィルターと同数の専用枠をご注文ください」が記載される。専用枠の説明がマグネットセットそのものに該当するかは文言の存在だけでは判断できない。
+- `src/editorial-rangehood-evidence.js` を追加し、型番照合、サイズ照合、専用枠記載、マグネットセット記載の短い原文証拠を抽出する。構成の混在を検出すると `configuration_review_required`、`articleEligible=false`、`published=0`。一般の仕様抽出・編集ゲートにそのまま流さない。
+- `src/run-editorial-rangehood-evidence.js` を追加。M8では `node --env-file=既存env src/run-editorial-rangehood-evidence.js` で読み取り専用実ページ診断を実行できる。
+- `test/editorial-rangehood-evidence.test.js` に3件追加。GitHubの作業ブランチのみ更新し、**今回の追加コードのM8実機テストは未実施**。
