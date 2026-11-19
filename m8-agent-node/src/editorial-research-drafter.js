@@ -78,8 +78,8 @@ function supportedStorageGuidance(facts) {
   if (!slimInner || !wideInner || !slimLoad || !wideLoad) return null;
   // Require structured, matching claims for *both* variants before putting
   // figures into reader-facing advice. Do not make up missing numbers.
-  const innerRe=/引出し内寸は幅(\\d+(?:\\.\\d+)?)×奥行(\\d+(?:\\.\\d+)?)×深さ(\\d+(?:\\.\\d+)?)cmと記載$/u;
-  const loadRe=/耐荷重は天板約(\\d+(?:\\.\\d+)?)kg、引出し1段あたり約(\\d+(?:\\.\\d+)?)kgと記載$/u;
+  const innerRe=/引出し内寸は幅(\d+(?:\.\d+)?)×奥行(\d+(?:\.\d+)?)×深さ(\d+(?:\.\d+)?)cmと記載$/u;
+  const loadRe=/耐荷重は天板約(\d+(?:\.\d+)?)kg、引出し1段あたり約(\d+(?:\.\d+)?)kgと記載$/u;
   const si=slimInner.match(innerRe),wi=wideInner.match(innerRe);
   const sl=slimLoad.match(loadRe),wl=wideLoad.match(loadRe);
   if(!si||!wi||!sl||!wl)return null;
