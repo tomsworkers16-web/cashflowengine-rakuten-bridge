@@ -193,3 +193,11 @@ M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用
 - `npm run editorial-pinned-draft` を追加（`.env` を読み込む）。本番稼働ディレクトリでなく独立のテスト環境から実行すること。代わりに `node --env-file="既存の読み取り元.env" src/run-editorial-pinned-draft.js` が使える。
 - `test/editorial-pinned-draft.test.js` を記事テスト群に追加。API情報と商品HTMLを模擬した end-to-end テスト、秘密保護、根拠不足の保留を確認する設計。**追加分のM8テスト結果は未取得**。前回の52件全合格とは分けて評価する。
 - 今後の汎用化では固定商品から自動選出候補に切り替え、対象ジャンルごとの抽出辞書、モデル接続、変種・利用条件の検証を段階的に進める。
+
+
+## 2026-11-20: 実API→記事下書き検証と本文品質の是正
+- M8実測：`npm run editorial-tests` は55件全合格、`node --env-file=... src/run-editorial-pinned-draft.js` は `status=review_candidate`、`evidenceCount=6`、`gateScore=12`、`published=0`。
+- 編集レビューでは初回出力に課題があった：楽天の商品名を先頭55字で切り落とすため見出しが不自然、本文のチェック項目が一般論中心で確認済み6仕様との関連が薄い。また確認日がUTC基準で日本時間の実測日から1日ずれ得る。
+- `editorial-research-drafter.js` を改善：収納商品のスリム/ワイド内寸と耐荷重が**ともに根拠付きで揃った場合のみ**、具体値と比較手順を本文の購入前チェックに入れる。数字が揃わない場合は一般的な注意点に戻す。見出しは途中切れを回避。
+- `run-editorial-pinned-draft.js` の確認日をAsia/Tokyoに変更し、回帰テストを追加。
+- 構造スコア12点は記事品質の完成保証ではない。公開・自動投稿は未承認、今回の編集改修後はM8未実行。従来の55件合格をそのまま最新版の検証済みとは扱わない。
