@@ -56,6 +56,24 @@ export async function fetchRakutenEditorialEvidence(itemCode,{
  * from the official API. Only a verified record with explicit evidence can be promoted.
  * This function intentionally refuses an automatic promotion on API payload alone.
  */
+
+// Rakuten sometimes returns the affiliate tracking URL in itemUrl as well.
+// Accept a directly verified product page or the official Rakuten affiliate pc= target.
+// Never decode arbitrary redirect URLs or trust external domains.
+export function canonicalRakutenItemUrl(input) {
+  try {
+    const url = new URL(input);
+    if (url.protocol !== 'https:') return null;
+    if (url.hostname === 'item.rakuten.co.jp') return url.origin + url.pathname.replace(/\/$/, '') + '/';
+    if (url.hostname !== 'hb.afl.rakuten.co.jp') return null;
+    const target = url.searchParams.get('pc');
+    if (!target) return null;
+    const page = new URL(target);
+    if (page.protocol !== 'https:' || page.hostname !== 'item.rakuten.co.jp') return null;
+    return page.origin + page.pathname.replace(/\/$/, '') + '/';
+  } catch { return null; }
+}
+
 export function assembleEditorialResearch(candidate, apiEvidence, productPageReview) {
   if (!candidate?.itemCode || apiEvidence?.itemCode!==candidate.itemCode)
     return {status:'research_required',reason:'item_identity_mismatch'};
@@ -67,7 +85,8 @@ export function assembleEditorialResearch(candidate, apiEvidence, productPageRev
   if (!isHttps(productPageReview.sourceUrl) ||
       !/^\d{4}-\d{2}-\d{2}$/.test(productPageReview.checkedAt||''))
     return {status:'research_required',reason:'invalid_product_page_provenance'};
-  if (apiEvidence.productPageUrl!==productPageReview.sourceUrl)
+  if (!canonicalRakutenItemUrl(apiEvidence.productPageUrl) ||
+      canonicalRakutenItemUrl(apiEvidence.productPageUrl)!==canonicalRakutenItemUrl(productPageReview.sourceUrl))
     return {status:'research_required',reason:'product_page_url_mismatch'};
   const specs=Array.isArray(productPageReview.specs)?productPageReview.specs:[];
   const supported=specs.filter(f=>typeof f?.id==='string' && f.id.trim() &&
