@@ -2,6 +2,8 @@
 // Fetch official Rakuten API evidence and the exact Rakuten product page;
 // extract and verify literal specs; prepare B-style offline review draft.
 // This command never publishes, schedules, posts, or writes to the live service.
+import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { fetchRakutenEditorialEvidence } from './editorial-rakuten-evidence.js';
 import { fetchRakutenProductPageHtml, verifyProductPageQuotes } from './editorial-page-verifier.js';
 import { extractEditorialSpecQuotes } from './editorial-spec-extractor.js';
@@ -46,9 +48,12 @@ export async function runPinnedEditorialDraft({
   }
   // rank=30 is only a *fixture* to pass the shortlist validator;
   // this pinned-product test does not verify the current Rakuten ranking.
+  const itemPrice=Number(evidence.facts.find(x=>x.id==='rakuten_item_price')?.claim.match(/(\\d+)円/u)?.[1]);
+  if(!Number.isFinite(itemPrice)||itemPrice<=0)
+    return {status:'research_required',reason:'official_price_missing',published:0};
   const candidate={itemCode:ITEM_CODE,itemName:evidence.facts.find(x=>x.id==='rakuten_item_name')
     ?.claim.replace(/^楽天商品検索API掲載の商品名：/u,'')||'壁付きチェスト 収納',
-    price:Number(evidence.facts.find(x=>x.id==='rakuten_item_price')?.claim.match(/(\d+)円/u)?.[1]||4999),
+    price:itemPrice,
     rank:30,hasAffiliateUrl:true};
   const result=buildEditorialArticleWorkflow({
     ranking:[candidate],
@@ -68,7 +73,7 @@ export async function runPinnedEditorialDraft({
     caveat:'Template draft, not an AI-model generated article; quoted text has been checked against HTML only. Check variant applicability, affiliate terms, product availability and publication approval separately.'
   };
 }
-if(process.argv[1] && new URL(import.meta.url).pathname.replaceAll('%20',' ').endsWith(process.argv[1].replaceAll('\\','/'))) {
+if(process.argv[1] && fileURLToPath(import.meta.url)===resolve(process.argv[1])) {
   runPinnedEditorialDraft({
     applicationId:process.env.RAKUTEN_APPLICATION_ID,
     accessKey:process.env.RAKUTEN_ACCESS_KEY,
