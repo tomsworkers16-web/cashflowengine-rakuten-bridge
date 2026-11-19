@@ -225,3 +225,11 @@ M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用
 - `src/editorial-rangehood-evidence.js` を追加し、型番照合、サイズ照合、専用枠記載、マグネットセット記載の短い原文証拠を抽出する。構成の混在を検出すると `configuration_review_required`、`articleEligible=false`、`published=0`。一般の仕様抽出・編集ゲートにそのまま流さない。
 - `src/run-editorial-rangehood-evidence.js` を追加。M8では `node --env-file=既存env src/run-editorial-rangehood-evidence.js` で読み取り専用実ページ診断を実行できる。
 - `test/editorial-rangehood-evidence.test.js` に3件追加。GitHubの作業ブランチのみ更新し、**今回の追加コードのM8実機テストは未実施**。
+
+
+## 2026-11-20: 真空保存容器の別ジャンル安全検証
+- 楽天ジャンル別ランキングで `kitchenavi:10000408` を候補選定。楽天商品ページおよび公式商品案内を調査したところ、ポンプの付属有無、レンジ時間と高油分食品の除外、食洗機のモード、真空ポンプの水洗い不可、液体量の制限、ガス排出食品の不適合など、購入前に重要な制約が複数ある。
+- 特に商品名に「電動」があっても、**容器単品購入にポンプが含まれるとは限らない**。個別SKUのオプションを確認する前に「セットで使える」と断定しない。類似・別型番の楽天ページから製品仕様を推定しない。
+- `src/editorial-vacuum-evidence.js` は商品本文にある注意事項の決め打ち引用を抽出し、欠落なら `product_conditions_incomplete`、主要条件が揃っても選択オプション未確認なら `variant_review_required` とする。常に `articleEligible=false,published=0`。
+- `src/run-editorial-vacuum-evidence.js` は正確な `kitchenavi:10000408` の楽天API URLを解決した後に、その商品ページを読み取り専用取得する。手動URL推測を回避。テスト `test/editorial-vacuum-evidence.test.js` 3件追加。
+- 開発ブランチのみ更新。**M8での追加実機テストと実商品判定は未実施**。今回段階は記事自動生成でなく、別ジャンルの安全な事実抽出が目的。
