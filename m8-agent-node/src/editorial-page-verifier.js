@@ -63,11 +63,38 @@ export function verifyProductPageQuotes({apiEvidence, pageUrl, html, quotePlans,
 }
 // Only exact Rakuten item pages: no automatic redirects to affiliate hosts or other domains.
 // The caller must obey the site's access policy; HTTP 403 and dynamic pages are held.
+// Most Rakuten item pages use UTF-8, but some shops still serve EUC-JP or
+// Shift_JIS. Response.text() always decodes as UTF-8 and corrupts those pages.
+// Decode raw bytes according to HTTP charset or HTML meta, failing closed when
+// the declared encoding cannot be decoded without replacement characters.
+function declaredCharset(type, sample) {
+  const header = /charset\s*=\s*["']?([^\s;"']+)/i.exec(type)?.[1];
+  if (header) return header;
+  const head = new TextDecoder('windows-1252').decode(sample.slice(0,8192));
+  const meta = /<meta\b[^>]*\bcharset\s*=\s*["']?([^\s"'/>;]+)/i.exec(head)?.[1];
+  return meta || null;
+}
+export function decodeProductPageHtml(bytes, contentType='') {
+  const data=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes);
+  if (!data.length || data.byteLength>1_000_000)throw new Error('product_page_too_large');
+  const label=declaredCharset(contentType,data);
+  if (label) {
+    try { return new TextDecoder(label,{fatal:true}).decode(data); }
+    catch { throw new Error('product_page_charset_invalid'); }
+  }
+  // Encoding unspecified: try standards-default UTF-8, then the two common
+  // legacy Japanese encodings. Never use replacement characters as evidence.
+  for (const candidate of ['utf-8','euc-jp','shift_jis']) {
+    try {return new TextDecoder(candidate,{fatal:true}).decode(data);}
+    catch { /* Try next decoder */ }
+  }
+  throw new Error('product_page_charset_unrecognized');
+}
+
 export async function fetchRakutenProductPageHtml(url,{fetchFn=fetch,signal}={}) {
   const canonical=canonicalRakutenItemUrl(url);
   if(!canonical || !/^https:\/\/item\.rakuten\.co\.jp\/[\w-]+\/[\w-]+\/$/.test(canonical))
     throw new Error('unsupported_product_page_url');
-  // Do not follow redirects (prevents server-side request forgery by redirection).
   const response=await fetchFn(canonical,{method:'GET',redirect:'manual',
     headers:{Accept:'text/html'},signal});
   if(!response?.ok)throw new Error('product_page_http_'+String(response?.status??'unknown'));
@@ -75,7 +102,12 @@ export async function fetchRakutenProductPageHtml(url,{fetchFn=fetch,signal}={})
   if(!/text\/html/i.test(type))throw new Error('product_page_not_html');
   const reported=Number(response.headers?.get?.('content-length'));
   if(Number.isFinite(reported)&&reported>1_000_000)throw new Error('product_page_too_large');
-  const html=await response.text();
+  // Real fetch responses always expose arrayBuffer(). Test stubs can also
+  // provide it; do not decode Japanese HTML through response.text().
+  if(typeof response.arrayBuffer!=='function')
+    throw new Error('product_page_binary_response_required');
+  const raw=await response.arrayBuffer();
+  const html=decodeProductPageHtml(raw,type);
   if(html.length>1_000_000)throw new Error('product_page_too_large');
   return {url:canonical,html};
 }
