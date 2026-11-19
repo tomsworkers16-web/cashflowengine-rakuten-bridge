@@ -5,6 +5,7 @@ import {fetchRakutenEditorialEvidence} from './editorial-rakuten-evidence.js';
 import {fetchRakutenProductPageHtml} from './editorial-page-verifier.js';
 import {analyzeVacuumContainerPage} from './editorial-vacuum-evidence.js';
 import {buildVacuumBuyerReviewDraft} from './editorial-vacuum-buyer-guide.js';
+import {extractVacuumSizeChart} from './editorial-vacuum-size-chart.js';
 
 const ITEM='kitchenavi:10000408';
 export async function runVacuumEvidence({
@@ -22,10 +23,12 @@ export async function runVacuumEvidence({
  try {page=await fetchRakutenProductPageHtml(product.productPageUrl,{fetchFn});}
  catch {return {status:'research_required',reason:'product_page_fetch_failed',published:0};}
  const review=analyzeVacuumContainerPage(page.html);
+ const sizeChart=extractVacuumSizeChart(page.html);
  const guide=buildVacuumBuyerReviewDraft(review,{sourceUrl:page.url,checkedAt});
  return {
   itemCode:ITEM,productPageUrl:page.url,
   ...review,
+  sizeChart,
   draftStatus:guide.status,
   reviewDraft:guide.reviewDraft??null,
   pending:guide.pending??['product_page_evidence'],
