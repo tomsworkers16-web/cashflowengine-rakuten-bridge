@@ -185,3 +185,11 @@ M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用
 - `src/editorial-spec-extractor.js` を追加。固定パターンで仕様文の原文断片を切り出し、スリム／ワイドを別々に管理する。取得した引用文字列を既存のHTML照合へ渡し、ページに実在しない文章は採用しない。
 - `src/editorial-page-verified-workflow.js` は利用者の引用指定がない場合のみ保守的な自動仕様抽出を利用する。公開は行わない。実商品ごとのHTMLレイアウト差分・別バリエーションの誤読に備え、公開前の意味的な確認を継続する。
 - `test/editorial-spec-extractor.test.js` をテストスクリプトへ登録。新機能のテストはM8未実施。従来の48件合格とは分けて報告する。
+
+
+## 2026-11-20: 実商品API→原文照合→B案型記事の一括実行入口
+- M8実ページの抽出・照合が `spec_quotes_extracted`、スリム2件・ワイド2件・共通2件、`page_quotes_matched`、`verifiedCount=6` で成功した（オーナー実測）。
+- `src/run-editorial-pinned-draft.js` を追加。特定の収納チェスト `e-kurashi:10048736` に限定した安全な試験入口：楽天公式商品API→楽天の商品ページ→仕様抽出→引用照合→既存のB品質ゲート→公開不可のMarkdown記事を出力。これは**LLM生成ではなく既存のテンプレート記事**。無人公開・SNS送信は含まない。
+- `npm run editorial-pinned-draft` を追加（`.env` を読み込む）。本番稼働ディレクトリでなく独立のテスト環境から実行すること。代わりに `node --env-file="既存の読み取り元.env" src/run-editorial-pinned-draft.js` が使える。
+- `test/editorial-pinned-draft.test.js` を記事テスト群に追加。API情報と商品HTMLを模擬した end-to-end テスト、秘密保護、根拠不足の保留を確認する設計。**追加分のM8テスト結果は未取得**。前回の52件全合格とは分けて評価する。
+- 今後の汎用化では固定商品から自動選出候補に切り替え、対象ジャンルごとの抽出辞書、モデル接続、変種・利用条件の検証を段階的に進める。
