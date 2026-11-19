@@ -67,6 +67,33 @@ const validDate = s => /^\d{4}-\d{2}-\d{2}$/.test(s||'') && !Number.isNaN(Date.p
 const https = s => typeof s === 'string' && /^https:\/\/[^\s]+$/i.test(s);
 const clean = s => typeof s === 'string' ? s.trim() : '';
 
+// Promote already sourced variant facts into actionable buying guidance; do not
+// infer dimensions, load limits or suitability from the product title alone.
+function supportedStorageGuidance(facts) {
+  const byId=new Map(facts.map(f=>[f.id,f.claim]));
+  const slimInner=byId.get('slim_drawer_inner_dimensions');
+  const wideInner=byId.get('wide_drawer_inner_dimensions');
+  const slimLoad=byId.get('slim_load_capacity');
+  const wideLoad=byId.get('wide_load_capacity');
+  if (!slimInner || !wideInner || !slimLoad || !wideLoad) return null;
+  const assembly=byId.get('assembly_duration');
+  const material=byId.get('material');
+  return {
+    title:'収納チェスト選びで見落としたくない3つのこと｜内寸・耐荷重・組み立て',
+    checks:[
+      {risk:'設置できても、引き出しを開けるスペースが足りない',
+       howToCheck:'置く場所の外寸だけでなく、引き出しを手前に出す空間と通路幅を測る。外寸が収まっても使えるとは限らない。'},
+      {risk:'スリムとワイドで収納できる物のサイズが違う',
+       howToCheck:'販売ページの記載は「'+slimInner+'」「'+wideInner+'」。収納する衣類・ケースの実寸を測り、深さと幅を比較する。'},
+      {risk:'重さや組み立ての条件を見落とす',
+       howToCheck:'販売ページの記載は「'+slimLoad+'」「'+wideLoad+'」。収納する物の重量を確認する。'+(assembly?'また「'+assembly+'」と案内されているため、組み立て場所と作業時間も考える。':'組み立て条件も販売ページで確認する。')}
+    ],
+    comparisonMethod:'①設置場所と引き出し前方の空間を採寸 → ②収納物の寸法をスリム・ワイドそれぞれの内寸と比較 → ③1段あたりの重量を耐荷重と照合する。'+(material?'販売ページには「'+material+'」とも記載されている。':''),
+    goodFor:'サイズを測ったうえで、引き出しの内寸と耐荷重が収納予定の物に合う人',
+    notGoodFor:'引き出し前方の空間を確保できない人や、収納物が記載の内寸・耐荷重を超える人'
+  };
+}
+
 /**
  * research = { itemCode, productPageUrl, checkedAt, facts:[{id,claim,sourceUrl,checkedAt}],
  *              affiliateUrl, rights: {noMedia:true}, subjectContext?:string }
@@ -84,14 +111,15 @@ export function draftFromResearch(candidate, research) {
   const theme = classifyTheme(candidate.itemName);
   const playbook = GUIDE[theme] || GUIDE.generic;
   const productName = clean(candidate.itemName);
+  const specific = theme==='storage' ? supportedStorageGuidance(facts) : null;
   const draft = {
     itemCode:candidate.itemCode,
-    title:'購入前に見落としたくない3つの条件｜'+productName.slice(0,55),
+    title:specific?.title || '購入前に確認したい3つのこと｜'+(productName.length>42?productName.slice(0,41)+'…':productName),
     reader:{problem:playbook.problem,context:clean(research.subjectContext)||playbook.context},
-    purchaseChecks:playbook.checks.map(([risk,howToCheck])=>({risk,howToCheck})),
-    comparisonMethod:'使う場所・製品仕様・手入れ方法を同じ表に並べ、合わない条件があれば購入を見送る',
-    goodFor:'各確認項目を商品ページと使用環境で照合でき、条件に合うと判断できた人',
-    notGoodFor:'サイズ・対応条件・手入れ方法のいずれかが確認できない、または合わない人',
+    purchaseChecks:specific?.checks || playbook.checks.map(([risk,howToCheck])=>({risk,howToCheck})),
+    comparisonMethod:specific?.comparisonMethod || '使う場所・製品仕様・手入れ方法を同じ表に並べ、合わない条件があれば購入を見送る',
+    goodFor:specific?.goodFor || '各確認項目を商品ページと使用環境で照合でき、条件に合うと判断できた人',
+    notGoodFor:specific?.notGoodFor || 'サイズ・対応条件・手入れ方法のいずれかが確認できない、または合わない人',
     verifiedFacts:facts.map(f=>({id:f.id,claim:f.claim,sourceUrl:f.sourceUrl,checkedAt:f.checkedAt})),
     productClaims:facts.map(f=>({text:f.claim,factId:f.id})),
     isAffiliate:true,disclosure:'【PR】',affiliateUrl:research.affiliateUrl,
