@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fetchRakutenProductPageHtml,verifyProductPageQuotes,extractProductPageText}
+import {fetchRakutenProductPageHtml,verifyProductPageQuotes,extractProductPageText,decodeProductPageHtml}
   from '../src/editorial-page-verifier.js';
 import {runEditorialPageVerifiedWorkflow} from '../src/editorial-page-verified-workflow.js';
 import {rakutenEditorialEvidence} from '../src/editorial-rakuten-evidence.js';
@@ -49,7 +49,7 @@ test('live fetch does not follow redirects or accept external hosts',async()=>{
  const result=await fetchRakutenProductPageHtml(productUrl,{fetchFn:async(url,opts)=>{
    urlSeen=url;optsSeen=opts;
    return {ok:true,status:200,headers:{get:key=>key==='content-type'?'text/html; charset=utf-8':null},
-    text:async()=>html};
+    arrayBuffer:async()=>Buffer.from(html,'utf8')};
  }});
  assert.equal(urlSeen,productUrl);
  assert.equal(optsSeen.redirect,'manual');
@@ -78,4 +78,23 @@ test('no text evidence cannot produce article',async()=>{
  });
  assert.equal(r.summary.reviewCandidates,0);
  assert.equal(r.pageVerification[0].status,'research_required');
+});
+
+test('decodes legacy EUC-JP HTML using meta charset without mangling Japanese',()=>{
+ const raw=Buffer.from('3c68746d6c3e3c686561643e3c6d65746120636861727365743d224555432d4a50223e3c2f686561643e3c626f64793ea5b3a5edb5d320a5c1a5a7a5b9a5c820c9fd3334636d20bae0bcc1a1a7a5dda5eaa5d7a5eda5d4a5eca5f33c2f626f64793e','hex');
+ const decoded=decodeProductPageHtml(raw,'text/html');
+ assert.match(decoded,/コロ脚 チェスト 幅34cm/);
+ assert.match(decoded,/材質：ポリプロピレン/);
+ assert.equal(extractProductPageText(decoded).includes('ポリプロピレン'),true);
+});
+test('legacy charset is supported in fetched binary response',async()=>{
+ const raw=Buffer.from('3c68746d6c3e3c686561643e3c6d65746120636861727365743d224555432d4a50223e3c2f686561643e3c626f64793ea5b3a5edb5d320a5c1a5a7a5b9a5c820c9fd3334636d20bae0bcc1a1a7a5dda5eaa5d7a5eda5d4a5eca5f33c2f626f64793e','hex');
+ const r=await fetchRakutenProductPageHtml(productUrl,{fetchFn:async()=>({
+  ok:true,status:200,headers:{get:k=>k==='content-type'?'text/html; charset=EUC-JP':null},
+  arrayBuffer:async()=>raw
+ })});
+ assert.match(r.html,/ポリプロピレン/);
+});
+test('unsupported or mismatched declared charset stops verification',()=>{
+ assert.throws(()=>decodeProductPageHtml(Buffer.from([255,255,255]),'text/html; charset=utf-8'),/product_page_charset_invalid/);
 });
