@@ -233,3 +233,11 @@ M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用
 - `src/editorial-vacuum-evidence.js` は商品本文にある注意事項の決め打ち引用を抽出し、欠落なら `product_conditions_incomplete`、主要条件が揃っても選択オプション未確認なら `variant_review_required` とする。常に `articleEligible=false,published=0`。
 - `src/run-editorial-vacuum-evidence.js` は正確な `kitchenavi:10000408` の楽天API URLを解決した後に、その商品ページを読み取り専用取得する。手動URL推測を回避。テスト `test/editorial-vacuum-evidence.test.js` 3件追加。
 - 開発ブランチのみ更新。**M8での追加実機テストと実商品判定は未実施**。今回段階は記事自動生成でなく、別ジャンルの安全な事実抽出が目的。
+
+
+## 2026-11-20: VAKUEN v11実機検証→B案型の安全な下書き
+- M8実測：`66 tests / 66 pass / 0 fail`。`kitchenavi:10000408` の実ページ `https://item.rakuten.co.jp/kitchenavi/2498-001010/` は `variant_review_required`、`foundCount=8`、`missingRequired=[]`、`articleEligible=false`、`published=0`。
+- 注意事項の抽出は成功。単品容器にはポンプ非付属、レンジ500〜600W/2分以内、油分の多い食材の加熱不可、食洗機標準モードのみ、ポンプ本体水洗い不可、液体量80%以下、ガスを出す食材の注意、温度範囲の8項目。
+- `editorial-vacuum-buyer-guide.js` を追加。根拠7項目が揃い、楽天商品ページの正当なURL・確認日がある場合に、B案型の購入前チェックをレビュー専用下書きとして返す。個別容量・選択セットのポンプ付属は断定せず、投稿もリンク販促も行わない。
+- 既存 `run-editorial-vacuum-evidence.js` へ `draftStatus` と `reviewDraft` を追加。ページの本文検査が保留でも、読者に役立つ説明文を確認可能にした。
+- 回帰テスト2件を追加し、実APIモックでも下書き生成を検証。今回の改修は開発ブランチのみで、**v12のM8実機テストはまだ未実施**。公開・本番反映・main変更なし。
