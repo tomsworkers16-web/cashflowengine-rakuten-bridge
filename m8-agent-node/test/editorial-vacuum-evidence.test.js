@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {analyzeVacuumContainerPage} from '../src/editorial-vacuum-evidence.js';
 import {runVacuumEvidence} from '../src/run-editorial-vacuum-evidence.js';
+import {buildVacuumBuyerReviewDraft} from '../src/editorial-vacuum-buyer-guide.js';
 const html='<html><body><main>VAKUEN 真空保存容器 商品情報 '+
  '単品でご購入の場合、自動真空ポンプは付属しません。 '+
  'Q5. 電子レンジに使えますか？ 500～600W・2分以内の温めのみ可。 '+
@@ -46,6 +47,24 @@ test('official item API -> exact product page, no secrets, no posts',async()=>{
  assert.equal(result.productPageUrl,'https://item.rakuten.co.jp/kitchenavi/2498-001010/');
  assert.equal(result.published,0);
  assert.equal(result.publishApproved,false);
+ assert.equal(result.draftStatus,'editorial_review_draft');
+ assert.match(result.reviewDraft,/単品でご購入の場合、自動真空ポンプは付属しません/);
+ assert.match(result.reviewDraft,/500〜600W・2分以内/);
+ assert.match(result.reviewDraft,/容量の80%以下/);
+ assert.match(result.reviewDraft,/商品選択肢の確認待ち/);
  assert.equal(fetched.length,2);
  assert.doesNotMatch(JSON.stringify(result),/APP_SECRET|KEY_SECRET|AFF_SECRET/);
+});
+
+test('evidence missing even one buyer caution prevents a guide draft',()=>{
+ const r=analyzeVacuumContainerPage(html.replace('単品でご購入の場合、自動真空ポンプは付属しません。',''));
+ const draft=buildVacuumBuyerReviewDraft(r,{sourceUrl:'https://item.rakuten.co.jp/kitchenavi/2498-001010/',checkedAt:'2026-11-20'});
+ assert.equal(draft.status,'research_required');
+ assert.equal(draft.reviewDraft,null);
+ assert.equal(draft.published,0);
+});
+test('no product page URL or date means no draft even with seven cautions',()=>{
+ const r=analyzeVacuumContainerPage(html);
+ assert.equal(buildVacuumBuyerReviewDraft(r,{sourceUrl:'https://example.com/fake',checkedAt:'2026-11-20'}).reviewDraft,null);
+ assert.equal(buildVacuumBuyerReviewDraft(r,{sourceUrl:'https://item.rakuten.co.jp/kitchenavi/2498-001010/'}).reviewDraft,null);
 });
