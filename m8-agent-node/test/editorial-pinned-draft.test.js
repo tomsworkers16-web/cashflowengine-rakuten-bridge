@@ -61,6 +61,6 @@ test('incomplete page evidence cannot generate a draft',async()=>{
 
 test('page verification date uses Japan local calendar day',()=>{
  assert.match(japanCheckedAt(),/^\d{4}-\d{2}-\d{2}$/);
- const expected=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const expected=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
  assert.equal(japanCheckedAt(),expected);
 });
