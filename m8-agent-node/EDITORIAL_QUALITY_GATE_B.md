@@ -241,3 +241,10 @@ M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用
 - `editorial-vacuum-buyer-guide.js` を追加。根拠7項目が揃い、楽天商品ページの正当なURL・確認日がある場合に、B案型の購入前チェックをレビュー専用下書きとして返す。個別容量・選択セットのポンプ付属は断定せず、投稿もリンク販促も行わない。
 - 既存 `run-editorial-vacuum-evidence.js` へ `draftStatus` と `reviewDraft` を追加。ページの本文検査が保留でも、読者に役立つ説明文を確認可能にした。
 - 回帰テスト2件を追加し、実APIモックでも下書き生成を検証。今回の改修は開発ブランチのみで、**v12のM8実機テストはまだ未実施**。公開・本番反映・main変更なし。
+
+
+## 2026-11-20: v12 実機合格・収益検証へ移行する判断
+- M8実測：`68 tests / 68 pass / 0 fail`、VAKUEN `kitchenavi:10000408` は `foundCount=8`、`missingRequired=[]`、`draftStatus=editorial_review_draft`、`reviewDraft` 本文出力成功。
+- ただし `status=variant_review_required`、`articleEligible=false`、`publishApproved=false`、`published=0`。未確認項目は `selected_variant_capacity`、`selected_bundle_pump_inclusion`、`final_editorial_review`。
+- 検証済み：①収納チェストはスペックの比較記事、②真空保存容器は注意事項ベースのB案型レビュー下書き。いずれも自動記事公開の本番運用・CV成果の検証ではない。
+- 次の優先順位は、商品選択肢の確定→編集審査→オーナー公開承認→小規模な配信とCTR/CV実測。未承認の自動公開は禁止。今後は承認済みの記事を使って初収益へつなげる実験を優先し、テンプレートの微修正を惰性で繰り返さない。
