@@ -69,6 +69,10 @@ test('real-source chest variants are used in buying guidance, not only fact appe
  assert.match(d.purchaseChecks[1].howToCheck,/幅46×奥行36×深さ16cm/);
  assert.match(d.purchaseChecks[2].howToCheck,/約2kg/);
  assert.match(d.purchaseChecks[2].howToCheck,/約3kg/);
+ assert.doesNotMatch(d.purchaseChecks[1].howToCheck,/と記載/);
+ assert.doesNotMatch(d.purchaseChecks[2].howToCheck,/と記載/);
+ assert.match(d.purchaseChecks[2].howToCheck,/組み立ての目安は約20〜30分/);
+ assert.match(d.purchaseChecks[1].howToCheck,/スリムが幅26×奥行36×深さ16cm、ワイドが幅46×奥行36×深さ16cm/);
  const result=buildEditorialArticleWorkflow({ranking:[candidate],researchByItemCode:{[candidate.itemCode]:packet}});
  assert.equal(result.summary.reviewCandidates,1);
  assert.match(result.entries[0].article,/幅26×奥行36×深さ16cm/);
