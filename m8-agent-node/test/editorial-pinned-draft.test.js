@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runPinnedEditorialDraft } from '../src/run-editorial-pinned-draft.js';
+import { runPinnedEditorialDraft, japanCheckedAt } from '../src/run-editorial-pinned-draft.js';
 
 const html='<html><body><h1>収納 チェスト 壁付き</h1>'+
  '<p>材質 ポリプロピレン 仕様 ●組立品です ●組立時間：約20-30分</p>'+
@@ -56,4 +56,11 @@ test('incomplete page evidence cannot generate a draft',async()=>{
  assert.equal(out.status,'research_required');
  assert.equal(out.published,0);
  assert.equal(out.article,undefined);
+});
+
+
+test('page verification date uses Japan local calendar day',()=>{
+ assert.match(japanCheckedAt(),/^\d{4}-\d{2}-\d{2}$/);
+ const expected=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ assert.equal(japanCheckedAt(),expected);
 });
