@@ -6,12 +6,12 @@ import {rakutenEditorialEvidence} from '../src/editorial-rakuten-evidence.js';
 const item={itemCode:'shop:001',itemName:'水切りかご 収納',price:3500,rank:3,hasAffiliateUrl:true};
 const evidence=rakutenEditorialEvidence({Items:[{Item:{
  itemCode:'shop:001',itemName:item.itemName,itemPrice:3500,
- itemUrl:'https://example.com/p',affiliateUrl:'https://example.com/a'
+ itemUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',affiliateUrl:'https://example.com/a'
 }}]},item.itemCode,{checkedAt:'2026-11-16'});
-const review={itemCode:item.itemCode,reviewed:true,sourceUrl:'https://example.com/p',
+const review={itemCode:item.itemCode,reviewed:true,sourceUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',
  checkedAt:'2026-11-16',specs:[
- {id:'s1',claim:'寸法記載',quote:'幅30cm',sourceUrl:'https://example.com/p',reviewed:true},
- {id:'s2',claim:'材質記載',quote:'ステンレス',sourceUrl:'https://example.com/p',reviewed:true}
+ {id:'s1',claim:'寸法記載',quote:'幅30cm',sourceUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',reviewed:true},
+ {id:'s2',claim:'材質記載',quote:'ステンレス',sourceUrl:'https://item.rakuten.co.jp/e-kurashi/s1u57/',reviewed:true}
 ]};
 const output={
  title:'水切りかごの失敗しない選び方',
