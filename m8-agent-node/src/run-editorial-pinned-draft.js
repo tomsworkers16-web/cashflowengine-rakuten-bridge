@@ -48,7 +48,7 @@ export async function runPinnedEditorialDraft({
   }
   // rank=30 is only a *fixture* to pass the shortlist validator;
   // this pinned-product test does not verify the current Rakuten ranking.
-  const itemPrice=Number(evidence.facts.find(x=>x.id==='rakuten_item_price')?.claim.match(/(\\d+)円/u)?.[1]);
+  const itemPrice=Number(evidence.facts.find(x=>x.id==='rakuten_item_price')?.claim.match(/(\d+)円/u)?.[1]);
   if(!Number.isFinite(itemPrice)||itemPrice<=0)
     return {status:'research_required',reason:'official_price_missing',published:0};
   const candidate={itemCode:ITEM_CODE,itemName:evidence.facts.find(x=>x.id==='rakuten_item_name')
