@@ -48,3 +48,32 @@ test('fabricated experience cannot be washed away by revision',()=>{
  assert.equal(r.status,'revision_required');
  assert.equal(r.reason,'manual_evidence_review_required');
 });
+
+
+test('real-source chest variants are used in buying guidance, not only fact appendix',()=>{
+ const candidate={itemCode:'e-kurashi:10048736',itemName:'コロ脚 壁付き チェスト 幅34/54 奥行41.5/41.7 高さ66.1cm 収納ケース',rank:24,price:4999,hasAffiliateUrl:true};
+ const sourceUrl='https://item.rakuten.co.jp/e-kurashi/s1u57/';
+ const claims=[
+  ['slim_drawer_inner_dimensions','スリムサイズの引出し内寸は幅26×奥行36×深さ16cmと記載'],
+  ['wide_drawer_inner_dimensions','ワイドサイズの引出し内寸は幅46×奥行36×深さ16cmと記載'],
+  ['slim_load_capacity','スリムサイズの耐荷重は天板約2kg、引出し1段あたり約2kgと記載'],
+  ['wide_load_capacity','ワイドサイズの耐荷重は天板約3kg、引出し1段あたり約3kgと記載'],
+  ['assembly_duration','組立時間は約20-30分と記載']
+ ];
+ const packet={itemCode:candidate.itemCode,affiliateUrl:'https://hb.afl.rakuten.co.jp/hgc/demo/',rights:{noMedia:true},
+   facts:claims.map(([id,claim])=>({id,claim,sourceUrl,checkedAt:'2026-11-20'}))};
+ const d=draftFromResearch(candidate,packet).draft;
+ assert.match(d.title,/内寸・耐荷重・組み立て/);
+ assert.doesNotMatch(d.title,/高さ66\.1cm/);
+ assert.match(d.purchaseChecks[1].howToCheck,/幅26×奥行36×深さ16cm/);
+ assert.match(d.purchaseChecks[1].howToCheck,/幅46×奥行36×深さ16cm/);
+ assert.match(d.purchaseChecks[2].howToCheck,/約2kg/);
+ assert.match(d.purchaseChecks[2].howToCheck,/約3kg/);
+ const result=buildEditorialArticleWorkflow({ranking:[candidate],researchByItemCode:{[candidate.itemCode]:packet}});
+ assert.equal(result.summary.reviewCandidates,1);
+ assert.match(result.entries[0].article,/幅26×奥行36×深さ16cm/);
+ assert.equal(result.summary.published,0);
+ const missing={...packet,facts:packet.facts.filter(f=>f.id!=='wide_load_capacity')};
+ const fallback=draftFromResearch(candidate,missing).draft;
+ assert.doesNotMatch(fallback.purchaseChecks[1].howToCheck,/幅46×奥行36×深さ16cm/);
+});
