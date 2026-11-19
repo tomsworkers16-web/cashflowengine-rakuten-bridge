@@ -4,6 +4,7 @@
 import { buildEditorialShortlist } from './editorial-shortlist.js';
 import { verifyProductPageQuotes, fetchRakutenProductPageHtml } from './editorial-page-verifier.js';
 import { runEditorialAiWorkflow } from './editorial-ai-workflow.js';
+import { extractEditorialSpecQuotes } from './editorial-spec-extractor.js';
 
 export async function runEditorialPageVerifiedWorkflow({
   ranking,apiEvidenceByItemCode={},quotePlansByItemCode={},
@@ -39,12 +40,16 @@ export async function runEditorialPageVerifiedWorkflow({
         continue;
       }
     }
+    const supplied=quotePlansByItemCode[candidate.itemCode];
+    const extracted=!Array.isArray(supplied)&&typeof snapshot==='string'
+      ?extractEditorialSpecQuotes(snapshot):null;
     const verified=verifyProductPageQuotes({
       apiEvidence:evidence,pageUrl,html:snapshot,
-      quotePlans:quotePlansByItemCode[candidate.itemCode],checkedAt
+      quotePlans:Array.isArray(supplied)?supplied:extracted?.quotePlans,checkedAt
     });
     pageVerification.push({itemCode:candidate.itemCode,status:verified.status,
-      reason:verified.reason||null,quoteCount:verified.pageReview?.specs?.length??0});
+      reason:verified.reason||null,quoteSource:Array.isArray(supplied)?'supplied':'pattern_extraction',
+      quoteCount:verified.pageReview?.specs?.length??0});
     if(verified.pageReview)productPageReviewsByItemCode[candidate.itemCode]=verified.pageReview;
   }
   const result=await runEditorialAiWorkflow({
