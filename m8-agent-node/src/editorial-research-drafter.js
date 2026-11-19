@@ -76,19 +76,27 @@ function supportedStorageGuidance(facts) {
   const slimLoad=byId.get('slim_load_capacity');
   const wideLoad=byId.get('wide_load_capacity');
   if (!slimInner || !wideInner || !slimLoad || !wideLoad) return null;
+  // Require structured, matching claims for *both* variants before putting
+  // figures into reader-facing advice. Do not make up missing numbers.
+  const innerRe=/引出し内寸は幅(\\d+(?:\\.\\d+)?)×奥行(\\d+(?:\\.\\d+)?)×深さ(\\d+(?:\\.\\d+)?)cmと記載$/u;
+  const loadRe=/耐荷重は天板約(\\d+(?:\\.\\d+)?)kg、引出し1段あたり約(\\d+(?:\\.\\d+)?)kgと記載$/u;
+  const si=slimInner.match(innerRe),wi=wideInner.match(innerRe);
+  const sl=slimLoad.match(loadRe),wl=wideLoad.match(loadRe);
+  if(!si||!wi||!sl||!wl)return null;
   const assembly=byId.get('assembly_duration');
   const material=byId.get('material');
+  const dims=(m)=>'幅'+m[1]+'×奥行'+m[2]+'×深さ'+m[3]+'cm';
   return {
     title:'収納チェスト選びで見落としたくない3つのこと｜内寸・耐荷重・組み立て',
     checks:[
       {risk:'設置できても、引き出しを開けるスペースが足りない',
        howToCheck:'置く場所の外寸だけでなく、引き出しを手前に出す空間と通路幅を測る。外寸が収まっても使えるとは限らない。'},
       {risk:'スリムとワイドで収納できる物のサイズが違う',
-       howToCheck:'販売ページの記載は「'+slimInner+'」「'+wideInner+'」。収納する衣類・ケースの実寸を測り、深さと幅を比較する。'},
+       howToCheck:'販売ページの引き出し内寸は、スリムが'+dims(si)+'、ワイドが'+dims(wi)+'。収納したい衣類やケースを実際に測り、幅・奥行・深さをそれぞれ比べる。'},
       {risk:'重さや組み立ての条件を見落とす',
-       howToCheck:'販売ページの記載は「'+slimLoad+'」「'+wideLoad+'」。収納する物の重量を確認する。'+(assembly?'また「'+assembly+'」と案内されているため、組み立て場所と作業時間も考える。':'組み立て条件も販売ページで確認する。')}
+       howToCheck:'販売ページに記載された引き出し1段あたりの耐荷重は、スリム約'+sl[2]+'kg、ワイド約'+wl[2]+'kg。収納物の重さを確かめる。'+(assembly==='組立時間は約20-30分と記載'?'組み立ての目安は約20〜30分。作業場所と時間も確保しておく。':'組み立て条件も販売ページで確認する。')}
     ],
-    comparisonMethod:'①設置場所と引き出し前方の空間を採寸 → ②収納物の寸法をスリム・ワイドそれぞれの内寸と比較 → ③1段あたりの重量を耐荷重と照合する。'+(material?'販売ページには「'+material+'」とも記載されている。':''),
+    comparisonMethod:'①設置場所と引き出し前方の空間を採寸 → ②収納物の寸法をスリム・ワイドそれぞれの内寸と比較 → ③1段あたりの重量を耐荷重と照合する。'+(material==='材質はポリプロピレンと記載'?'材質はポリプロピレンと案内されている。':''),
     goodFor:'サイズを測ったうえで、引き出しの内寸と耐荷重が収納予定の物に合う人',
     notGoodFor:'引き出し前方の空間を確保できない人や、収納物が記載の内寸・耐荷重を超える人'
   };
