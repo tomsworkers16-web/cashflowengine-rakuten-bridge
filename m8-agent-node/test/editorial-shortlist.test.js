@@ -51,3 +51,12 @@ test('ranking probe produces separate shortlist without posting',async()=>{
  assert.equal(out.persistencePerformed,false);
  assert.doesNotMatch(JSON.stringify(out),/secret/);
 });
+
+
+test('rejects Zoff lucky bag misclassified by accessory wording',()=>{
+ const bag=product(11,'zoff','【Zoff 福袋2027】メガネ券付き メガネマット',6600);
+ assert.equal(evaluateRankingCandidate(bag),null);
+ const chest=product(24,'e-kurashi','コロ脚 壁付き チェスト 収納ケース',4999);
+ assert.equal(evaluateRankingCandidate(chest).theme,'storage');
+ assert.deepEqual(buildEditorialShortlist([bag,chest],{max:2}).selected.map(x=>x.itemCode),[chest.itemCode]);
+});
