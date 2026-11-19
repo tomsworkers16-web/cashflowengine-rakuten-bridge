@@ -248,3 +248,12 @@ M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用
 - ただし `status=variant_review_required`、`articleEligible=false`、`publishApproved=false`、`published=0`。未確認項目は `selected_variant_capacity`、`selected_bundle_pump_inclusion`、`final_editorial_review`。
 - 検証済み：①収納チェストはスペックの比較記事、②真空保存容器は注意事項ベースのB案型レビュー下書き。いずれも自動記事公開の本番運用・CV成果の検証ではない。
 - 次の優先順位は、商品選択肢の確定→編集審査→オーナー公開承認→小規模な配信とCTR/CV実測。未承認の自動公開は禁止。今後は承認済みの記事を使って初収益へつなげる実験を優先し、テンプレートの微修正を惰性で繰り返さない。
+
+
+## 2026-11-20: M8不在時に実施したオンライン作業
+- オーナーはM8にアクセスできない。実機操作を求めず、GitHub開発ブランチと公開情報を利用して作業を継続。
+- 楽天商品ページ `https://item.rakuten.co.jp/kitchenavi/2498-001010/` をWebで確認。容量・外寸は MINI 0.3/0.5/0.8L、BASIC 0.5/1.0/1.4L、HIGH 1.0/2.0/3.1L、LONG 1.95L、LARGE 4.0L と記載。個別購入オプションの在庫・セット・ポンプ付属は未確認。
+- `editorial-vacuum-size-chart.js` で製品仕様の限定領域から容量と外寸を最大20候補まで抽出。原文の領域が不明確/容量重複なら保留。選択済みSKUを推定しない。
+- `run-editorial-vacuum-evidence.js` へサイズ一覧を統合。条件が揃った場合に、レビュー用の記事へ「製品説明上の参考寸法」として反映。サイズの一覧は販売オプションの確定を意味しない。
+- `editorial-vacuum-size-chart.test.js` を3件、`editorial-vacuum-evidence.test.js` を1件追加。JS単体で11種類抽出→記事本文生成→`published=0` を簡易検証済み。**M8の更新版テストは未実施**。最新版は少なくとも72件のテスト構成だが、合格件数を未確認のまま合格と報告しない。
+- 公開/送信/mainへのマージ/本番設定変更はしていない。M8復帰時のみ実機テストを実施し、記事公開は別途オーナー承認を得る。
