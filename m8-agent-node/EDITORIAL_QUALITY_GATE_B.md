@@ -172,3 +172,10 @@ npm run editorial-rakuten-research
 
 ### 次の検証
 M8の稼働中フォルダは触らず、開発ブランチのZIPをテスト用フォルダへ再展開した後、`npm.cmd run editorial-tests` を実行する。失敗箇所を修正し、その後に実商品ページを自動取得できるか確認する。
+
+
+## 2026-11-20 実ページ検証結果と文字コード修正
+- M8実データ調査：HTML 248,515文字／抽出本文5,083文字、`コロ脚`・`チェスト`・`幅34`・`ポリプロピレン` のいずれも初期取得文字列には出現しなかった。
+- 取得タイトルが文字化けしており、`response.text()` のUTF-8固定デコードが原因である可能性が高い。商品ページがEUC-JP等の日本語旧文字コードで返されることを想定して修正した。
+- `editorial-page-verifier.js` は `response.arrayBuffer()` で取得し、HTTP Content-TypeのcharsetまたはHTML meta charsetを優先し、TextDecoderの厳密モードで日本語HTMLを復元する。宣言なしのときは UTF-8 / EUC-JP / Shift_JIS の順で厳密デコードを試す。曖昧な文字化けを証拠として使用しない。
+- EUC-JP固定バイト列の回帰テストを追加した。今回の変更はGitHub開発ブランチに保存済みで、M8実機での再実行はまだ。実ページ本文に商品詳細が存在するかも未確定である。
