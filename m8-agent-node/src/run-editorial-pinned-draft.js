@@ -11,9 +11,11 @@ import { buildEditorialArticleWorkflow } from './editorial-article-workflow.js';
 
 const ITEM_CODE='e-kurashi:10048736';
 const PAGE='https://item.rakuten.co.jp/e-kurashi/s1u57/';
+// Pages are checked by the M8 operator in Japan; use the local calendar day.
+export const japanCheckedAt=()=>new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
 export async function runPinnedEditorialDraft({
   applicationId,accessKey,affiliateId,fetchFn=fetch,
-  checkedAt=new Date().toISOString().slice(0,10)
+  checkedAt=japanCheckedAt()
 }={}) {
   if(!applicationId||!accessKey||!affiliateId) {
     return {status:'research_required',reason:'rakuten_credentials_missing',published:0};
