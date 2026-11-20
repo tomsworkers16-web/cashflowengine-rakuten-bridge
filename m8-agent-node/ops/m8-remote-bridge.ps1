@@ -165,12 +165,14 @@ try{
   $zip=Join-Path $temp 'source.zip'
   $extract=Join-Path $temp 'extracted'
   if(Test-Path -LiteralPath $temp){Remove-Item -LiteralPath $temp -Recurse -Force}
+  if(Test-Path -LiteralPath $dest){throw 'incomplete_snapshot_exists_manual_review_required'}
   New-Item -ItemType Directory -Path $extract -Force | Out-Null
   try{
    $archiveUrl="https://api.github.com/repos/$source/zipball/$sha"
    Invoke-WebRequest -Uri $archiveUrl -Headers $headers -TimeoutSec 90 -OutFile $zip -UseBasicParsing
    if((Get-Item -LiteralPath $zip).Length -gt 25MB){throw 'archive_too_large'}
    Add-Type -AssemblyName System.IO.Compression
+   Add-Type -AssemblyName System.IO.Compression.FileSystem
    $archive=[IO.Compression.ZipFile]::OpenRead($zip)
    try{
     $entries=@($archive.Entries)
