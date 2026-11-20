@@ -42,9 +42,21 @@ function Act([string]$name){
   if(-not(Test-Path -LiteralPath $testRoot)){return @{status='isolated_test_folder_missing';published=0}}
   $packages=@(Get-ChildItem -LiteralPath $testRoot -Recurse -Filter package.json -File | Where-Object {$_.Directory.Name -eq 'm8-agent-node'})
   if($packages.Count -ne 1){return @{status='isolated_test_folder_missing_or_ambiguous';published=0}}
-  Push-Location $packages[0].Directory.FullName
-  try{$log=(& npm.cmd run editorial-tests 2>&1 | Out-String);$exit=$LASTEXITCODE}
-  finally{Pop-Location}
+  # Bound run time. Never upload raw logs or credentials to GitHub.
+  $outFile=Join-Path $local 'test-stdout.tmp'
+  $errFile=Join-Path $local 'test-stderr.tmp'
+  try {
+   $process=Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','editorial-tests') -WorkingDirectory $packages[0].Directory.FullName -NoNewWindow -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+   if(-not $process.WaitForExit(120000)){
+    try{$process.Kill()}catch{}
+    return @{action='editorial-tests';status='timed_out';published=0}
+   }
+   $process.Refresh()
+   $exit=$process.ExitCode
+   $log=Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue
+  } finally {
+   Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue
+  }
   $data=@{}
   foreach($key in @('tests','pass','fail')){
    $m=[regex]::Match($log,"(?m)^[^\r\n]*?(?:#|ℹ)\s*$key\s+(\d+)\s*$")
