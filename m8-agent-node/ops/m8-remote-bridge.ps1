@@ -73,23 +73,39 @@ function Act([string]$name){
  return @{status='action_denied';published=0}
 }
 function Poll{
+ $script:pollStage='repo-metadata'
  $metadata=Api 'GET' ''
- if($metadata.private -ne $true){throw 'control_repo_not_private'}
- $issues=@(Api 'GET' '/issues?state=open&per_page=20&labels=m8-remote')
+ if($null -eq $metadata -or $metadata.private -ne $true){throw 'control_repo_not_private'}
+ $script:pollStage='issue-list'
+ $response=Api 'GET' '/issues?state=open&per_page=20&labels=m8-remote'
+ # A zero-item API response must be treated as an empty collection, not
+ # a single placeholder item under Windows PowerShell 5.1 StrictMode.
+ if($null -eq $response){return}
+ $issues=@($response)
+ if($issues.Count -eq 0){return}
  foreach($i in $issues){
-  # An empty GitHub issue list can become @($null) in Windows PowerShell.
-  # Under StrictMode accessing properties of $null crashes the whole poll.
   if($null -eq $i){continue}
+  if(-not ($i -is [psobject])){continue}
   if($i.PSObject.Properties.Name -contains 'pull_request'){continue}
+  if(-not ($i.PSObject.Properties.Name -contains 'user')){continue}
+  if($null -eq $i.user){continue}
+  if(-not ($i.user.PSObject.Properties.Name -contains 'id')){continue}
   if([int64]$i.user.id -ne $ownerId){continue}
-  if($i.title -notmatch '^\[M8-REMOTE\]'){continue}
+  if(-not ($i.PSObject.Properties.Name -contains 'title')){continue}
+  if([string]$i.title -notmatch '^\[M8-REMOTE\]'){continue}
+  if(-not ($i.PSObject.Properties.Name -contains 'body')){continue}
   $action=([string]$i.body).Trim()
   if(@('health','editorial-tests') -cnotcontains $action){continue}
+  if(-not ($i.PSObject.Properties.Name -contains 'number')){continue}
+  $script:pollStage='action'
   try {$r=Act $action} catch {$r=@{action=$action;status='execution_failed';published=0}}
   $body='M8 bridge result (summary only)'+[Environment]::NewLine+(ConvertTo-Json -InputObject $r -Depth 5)
+  $script:pollStage='result-comment'
   Api 'POST' ("/issues/"+[int]$i.number+"/comments") @{body=$body} | Out-Null
+  $script:pollStage='issue-close'
   Api 'PATCH' ("/issues/"+[int]$i.number) @{state='closed'} | Out-Null
  }
+ $script:pollStage='idle'
 }
 New-Item -ItemType Directory -Path $local -Force | Out-Null
 if($Setup){
@@ -115,7 +131,12 @@ try{
    $status=$null
    try{$status=[int]$_.Exception.Response.StatusCode}catch{}
    if($null -ne $status){Write-Host ('Poll failed: GitHub HTTP '+$status+'. Check token access and repository permissions.')}
-   else{Write-Host ('Poll failed: '+$_.Exception.GetType().Name+'. Check setup and issue format.')}
+   else{
+    $line='unknown'
+    try{$line=[string]$_.InvocationInfo.ScriptLineNumber}catch{}
+    $step=if($script:pollStage){$script:pollStage}else{'unknown'}
+    Write-Host ('Poll failed: '+$_.Exception.GetType().Name+'; stage='+$step+'; line='+$line+'.')
+   }
   }
   if(-not $Once){Start-Sleep -Seconds 60}
  }while(-not $Once)
