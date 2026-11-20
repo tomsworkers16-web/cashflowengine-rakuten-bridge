@@ -10,7 +10,7 @@ $secretFile=Join-Path $local 'github-token.dpapi'
 $testRoot='C:\CFE-Editorial-Test-v13'
 function Token {
  if(-not(Test-Path -LiteralPath $secretFile)){throw 'token_not_configured'}
- $s=Get-Content -LiteralPath $secretFile -Raw | ConvertTo-SecureString
+ $s=(Get-Content -LiteralPath $secretFile -Raw).Trim() | ConvertTo-SecureString
  $p=[Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
  try {[Runtime.InteropServices.Marshal]::PtrToStringBSTR($p)}
  finally {[Runtime.InteropServices.Marshal]::ZeroFreeBSTR($p)}
@@ -60,7 +60,7 @@ function Poll{
  if($metadata.private -ne $true){throw 'control_repo_not_private'}
  $issues=@(Api 'GET' '/issues?state=open&per_page=20&labels=m8-remote')
  foreach($i in $issues){
-  if($null -ne $i.pull_request){continue}
+  if($i.PSObject.Properties.Name -contains 'pull_request'){continue}
   if([int64]$i.user.id -ne $ownerId){continue}
   if($i.title -notmatch '^\[M8-REMOTE\]'){continue}
   $action=([string]$i.body).Trim()
