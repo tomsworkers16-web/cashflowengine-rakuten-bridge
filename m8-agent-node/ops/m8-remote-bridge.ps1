@@ -7,7 +7,7 @@ $ownerId=267393119
 $base="https://api.github.com/repos/$repo"
 $local=Join-Path $env:LOCALAPPDATA 'AstonishFactory\M8Remote'
 $secretFile=Join-Path $local 'github-token.dpapi'
-$testRoot='C:\CFE-Editorial-Test-v13'
+$testRoots=@('C:\CFE-Editorial-Test-v13','C:\CFE-Editorial-Test-v12','C:\CFE-Editorial-Test-v11','C:\CFE-Editorial-Test-v10')
 function Token {
  if(-not(Test-Path -LiteralPath $secretFile)){throw 'token_not_configured'}
  $s=(Get-Content -LiteralPath $secretFile -Raw).Trim() | ConvertTo-SecureString
@@ -39,9 +39,14 @@ function Act([string]$name){
   return @{action='health';nodeAvailable=([bool](Get-Command node.exe -ErrorAction SilentlyContinue));port18787Reachable=$reachable;published=0}
  }
  if($name -eq 'editorial-tests'){
-  if(-not(Test-Path -LiteralPath $testRoot)){return @{status='isolated_test_folder_missing';published=0}}
-  $packages=@(Get-ChildItem -LiteralPath $testRoot -Recurse -Filter package.json -File | Where-Object {$_.Directory.Name -eq 'm8-agent-node'})
-  if($packages.Count -ne 1){return @{status='isolated_test_folder_missing_or_ambiguous';published=0}}
+  $packages=@()
+  $selectedRoot=$null
+  foreach($root in $testRoots) {
+   if(-not(Test-Path -LiteralPath $root)){continue}
+   $found=@(Get-ChildItem -LiteralPath $root -Recurse -Filter package.json -File -ErrorAction Stop | Where-Object {$_.Directory.Name -eq 'm8-agent-node'})
+   if($found.Count -eq 1) {$packages=$found;$selectedRoot=$root;break}
+  }
+  if($packages.Count -ne 1){return @{action='editorial-tests';status='isolated_test_folder_missing_or_ambiguous';published=0}}
   # Bound run time. Never upload raw logs or credentials to GitHub.
   $outFile=Join-Path $local 'test-stdout.tmp'
   $errFile=Join-Path $local 'test-stderr.tmp'
@@ -63,7 +68,7 @@ function Act([string]$name){
    if($m.Success){$data[$key]=[int]$m.Groups[1].Value}
   }
   $ok=($exit -eq 0 -and $data.ContainsKey('tests') -and $data.ContainsKey('pass') -and $data.ContainsKey('fail') -and $data['fail'] -eq 0 -and $data['tests'] -eq $data['pass'])
-  return @{action='editorial-tests';status=$(if($ok){'passed'}else{'failed_or_unparsed'});summary=$data;exitCode=$exit;published=0}
+  return @{action='editorial-tests';testRoot=$selectedRoot;status=$(if($ok){'passed'}else{'failed_or_unparsed'});summary=$data;exitCode=$exit;published=0}
  }
  return @{status='action_denied';published=0}
 }
