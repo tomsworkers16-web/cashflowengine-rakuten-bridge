@@ -72,6 +72,9 @@ function Poll{
  if($metadata.private -ne $true){throw 'control_repo_not_private'}
  $issues=@(Api 'GET' '/issues?state=open&per_page=20&labels=m8-remote')
  foreach($i in $issues){
+  # An empty GitHub issue list can become @($null) in Windows PowerShell.
+  # Under StrictMode accessing properties of $null crashes the whole poll.
+  if($null -eq $i){continue}
   if($i.PSObject.Properties.Name -contains 'pull_request'){continue}
   if([int64]$i.user.id -ne $ownerId){continue}
   if($i.title -notmatch '^\[M8-REMOTE\]'){continue}
@@ -103,7 +106,12 @@ try{
  $locked=$mutex.WaitOne(0)
  if(-not $locked){Write-Host 'Bridge already running';exit 0}
  do{
-  try{Poll}catch{Write-Host 'Poll failed; retry next cycle.'}
+  try{Poll; if($Once){Write-Host 'Poll OK: private GitHub control repo reachable.'}}catch{
+   $status=$null
+   try{$status=[int]$_.Exception.Response.StatusCode}catch{}
+   if($null -ne $status){Write-Host ('Poll failed: GitHub HTTP '+$status+'. Check token access and repository permissions.')}
+   else{Write-Host ('Poll failed: '+$_.Exception.GetType().Name+'. Check setup and issue format.')}
+  }
   if(-not $Once){Start-Sleep -Seconds 60}
  }while(-not $Once)
 }finally{
