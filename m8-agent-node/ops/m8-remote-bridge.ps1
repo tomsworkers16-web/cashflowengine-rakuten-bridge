@@ -131,10 +131,7 @@ function Act([string]$name){
   $info=SyncEditorialSnapshot
   $tests=RunEditorialSnapshotTests -root $info.testRoot
   if($null -eq $tests){throw 'snapshot_runner_returned_no_result'}
-  $tests['action']='editorial-sync-test'
-  $tests['commit']=$info.commit
-  $tests['staged']=$info.staged
-  return $tests
+  return @{action='editorial-sync-test';commit=$info.commit;staged=$info.staged;status=$tests.status;summary=$tests.summary;exitCode=$tests.exitCode;published=0}
  }
  if($name -eq 'health'){
   $tcp=New-Object Net.Sockets.TcpClient
@@ -159,9 +156,7 @@ function Act([string]$name){
   if($packages.Count -ne 1){return @{action='editorial-tests';status='isolated_test_folder_missing_or_ambiguous';published=0}}
   $result=Invoke-EditorialTestProcess -workingDir $packages[0].Directory.FullName
   if($null -eq $result){throw 'runner_returned_no_result'}
-  $result['action']='editorial-tests'
-  $result['testRoot']=$selectedRoot
-  return $result
+  return @{action='editorial-tests';testRoot=$selectedRoot;status=$result.status;summary=$result.summary;exitCode=$result.exitCode;published=0}
  }
  return @{status='action_denied';published=0}
 }
