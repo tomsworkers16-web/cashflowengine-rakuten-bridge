@@ -27,3 +27,14 @@
 - PowerShell `Start-Process -NoNewWindow` から、.NET `ProcessStartInfo` の `CreateNoWindow=true`, `UseShellExecute=false`, `RedirectStandardOutput=true`, `RedirectStandardError=true` に切替。標準出力・標準エラーは非同期で収集し、終了コードは `Process.ExitCode` を取得する。GitHubには件数・結果だけを送る。
 - 120秒の上限を維持。旧版の空の黒いテストコンソールと exitCode=null の改善が目的。
 - **GitHub実装は済み、M8への反映・構文チェック・実機テストは未実施**。次にPS1をSHA固定のGitHub APIで取得し、Windows PowerShellのParserで構文チェック後、常駐タスクを再起動する。検証までは「修正完了」としない。
+
+## 2026-11-22 深夜作業引継ぎ（ユーザー就寝、作業終了）
+- GitHub指示用非公開リポジトリ: `tomsworkers16-web/cfe-m8-control`。M8タスク `AstonishFactory-M8Remote` の `Running` をユーザーが確認。
+- 直近の遠隔テスト #14: `RuntimeException` line 158 → #15: `RuntimeException` line 162 → #16: `PropertyNotFoundException` line 159。GitHub開発ブランチで戻り値処理を修正した。
+- #17：**実測で成功**。M8側 `C:\CFE-Editorial-Test-v12` の68件テスト実行。GitHub返送結果 `tests=68, pass=68, fail=0, exitCode=0, status=passed, published=0`。Issue自動Close。黒いテスト実行窓が非表示になったかは別途未検証。
+- #18：最新隔離スナップショットに対する `editorial-sync-test` をChatGPTが登録。**最終確認時点でOpen・返信なし**。次回はまず #18 の状態・コメントをGitHubで取得すること。完了と推測しない。
+- ブリッジ現行コードの更新：`eef89eb1eeb63f42707088d9ca92fdb8269cf0ad` にて結果戻り値形式の安全なチェックを追加。ユーザーによるM8反映済み。#17成功を確認。
+- 残作業：#18の最新テスト件数・終了コードを確認、黒いPowerShell常駐ウィンドウの非表示設定、タスク再起動後の自動復旧と長時間安定稼働の確認。
+- 重要：現行タスクはログオン時起動で、常駐PowerShell本体の黒い画面を閉じると通信断になる可能性がある。ユーザーにはまだ画面を閉じさせない。
+- 安全ルール：本番Threads投稿とM8稼働中プログラムを変更しない。GitHub開発ブランチだけを編集し、mainマージ・本番反映はオーナー承認必須。M8への新しいコード反映前は必ずPowerShell構文チェック。
+- ユーザーは「もう寝る」と明示している。今夜は追加操作を求めない。
