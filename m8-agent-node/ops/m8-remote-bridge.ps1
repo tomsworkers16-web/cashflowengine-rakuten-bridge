@@ -117,6 +117,21 @@ function Invoke-EditorialTestProcess([string]$workingDir) {
  } finally {$process.Dispose()}
 }
 
+function ConvertTo-SafeTestSummary([object]$raw,[string]$action,[string]$root) {
+ $values=@($raw)
+ $matches=@($values | Where-Object { $_ -is [System.Collections.IDictionary] -and $_.Contains('status') })
+ if($matches.Count -eq 0){
+  $types=@($values | ForEach-Object { if($null -eq $_){'null'}else{$_.GetType().Name} })
+  return @{action=$action;status='runner_result_invalid';itemCount=$values.Count;itemTypes=($types -join ',');published=0}
+ }
+ $item=$matches[$matches.Count-1]
+ $result=@{action=$action;status=[string]$item['status'];published=0}
+ if($item.Contains('summary')){$result['summary']=$item['summary']}
+ if($item.Contains('exitCode')){$result['exitCode']=$item['exitCode']}
+ if($root){$result['testRoot']=$root}
+ return $result
+}
+
 function RunEditorialSnapshotTests([string]$root){
  $package=Join-Path $root 'm8-agent-node\package.json'
  if(-not(Test-Path -LiteralPath $package)){throw 'snapshot_package_missing'}
@@ -130,8 +145,10 @@ function Act([string]$name){
  if($name -eq 'editorial-sync-test'){
   $info=SyncEditorialSnapshot
   $tests=RunEditorialSnapshotTests -root $info.testRoot
-  if($null -eq $tests){throw 'snapshot_runner_returned_no_result'}
-  return @{action='editorial-sync-test';commit=$info.commit;staged=$info.staged;status=$tests.status;summary=$tests.summary;exitCode=$tests.exitCode;published=0}
+  $result=ConvertTo-SafeTestSummary -raw $tests -action 'editorial-sync-test' -root $info.testRoot
+  $result['commit']=$info.commit
+  $result['staged']=$info.staged
+  return $result
  }
  if($name -eq 'health'){
   $tcp=New-Object Net.Sockets.TcpClient
@@ -154,9 +171,8 @@ function Act([string]$name){
    if($found.Count -eq 1) {$packages=$found;$selectedRoot=$root;break}
   }
   if($packages.Count -ne 1){return @{action='editorial-tests';status='isolated_test_folder_missing_or_ambiguous';published=0}}
-  $result=Invoke-EditorialTestProcess -workingDir $packages[0].Directory.FullName
-  if($null -eq $result){throw 'runner_returned_no_result'}
-  return @{action='editorial-tests';testRoot=$selectedRoot;status=$result.status;summary=$result.summary;exitCode=$result.exitCode;published=0}
+  $raw=Invoke-EditorialTestProcess -workingDir $packages[0].Directory.FullName
+  return ConvertTo-SafeTestSummary -raw $raw -action 'editorial-tests' -root $selectedRoot
  }
  return @{status='action_denied';published=0}
 }
