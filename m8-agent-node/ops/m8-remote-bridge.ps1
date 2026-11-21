@@ -187,7 +187,11 @@ function Poll{
   if(@('health','editorial-tests','editorial-sync','editorial-sync-test') -cnotcontains $action){continue}
   if(-not ($i.PSObject.Properties.Name -contains 'number')){continue}
   $script:pollStage='action'
-  try {$r=Act $action} catch {$r=@{action=$action;status='execution_failed';published=0}}
+  try {$r=Act $action} catch {
+   $errorLine=0
+   try {$errorLine=[int]$_.InvocationInfo.ScriptLineNumber} catch {}
+   $r=@{action=$action;status='execution_failed';errorType=$_.Exception.GetType().Name;errorLine=$errorLine;published=0}
+  }
   $body='M8 bridge result (summary only)'+[Environment]::NewLine+(ConvertTo-Json -InputObject $r -Depth 5)
   $script:pollStage='result-comment'
   Api 'POST' ("/issues/"+[int]$i.number+"/comments") @{body=$body} | Out-Null
