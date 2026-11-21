@@ -120,14 +120,17 @@ function Invoke-EditorialTestProcess([string]$workingDir) {
 function RunEditorialSnapshotTests([string]$root){
  $package=Join-Path $root 'm8-agent-node\package.json'
  if(-not(Test-Path -LiteralPath $package)){throw 'snapshot_package_missing'}
- return Invoke-EditorialTestProcess -workingDir (Split-Path -Parent $package)
+ $result=Invoke-EditorialTestProcess -workingDir (Split-Path -Parent $package)
+ if($null -eq $result){throw 'runner_returned_no_result'}
+ return $result
 }
 
 function Act([string]$name){
- if($name -eq 'editorial-sync'){return SyncEditorialSnapshot}
+ if($name -eq 'editorial-sync'){$snapshot=SyncEditorialSnapshot;return $snapshot}
  if($name -eq 'editorial-sync-test'){
   $info=SyncEditorialSnapshot
   $tests=RunEditorialSnapshotTests -root $info.testRoot
+  if($null -eq $tests){throw 'snapshot_runner_returned_no_result'}
   $tests['action']='editorial-sync-test'
   $tests['commit']=$info.commit
   $tests['staged']=$info.staged
@@ -155,6 +158,7 @@ function Act([string]$name){
   }
   if($packages.Count -ne 1){return @{action='editorial-tests';status='isolated_test_folder_missing_or_ambiguous';published=0}}
   $result=Invoke-EditorialTestProcess -workingDir $packages[0].Directory.FullName
+  if($null -eq $result){throw 'runner_returned_no_result'}
   $result['action']='editorial-tests'
   $result['testRoot']=$selectedRoot
   return $result
@@ -190,7 +194,10 @@ function Poll{
   try {$r=Act $action} catch {
    $errorLine=0
    try {$errorLine=[int]$_.InvocationInfo.ScriptLineNumber} catch {}
-   $r=@{action=$action;status='execution_failed';errorType=$_.Exception.GetType().Name;errorLine=$errorLine;published=0}
+   $errorCode='unspecified'
+   if($_.Exception.Message -eq 'runner_returned_no_result'){$errorCode='runner_returned_no_result'}
+   if($_.Exception.Message -eq 'snapshot_runner_returned_no_result'){$errorCode='snapshot_runner_returned_no_result'}
+   $r=@{action=$action;status='execution_failed';errorType=$_.Exception.GetType().Name;errorLine=$errorLine;errorCode=$errorCode;published=0}
   }
   $body='M8 bridge result (summary only)'+[Environment]::NewLine+(ConvertTo-Json -InputObject $r -Depth 5)
   $script:pollStage='result-comment'
