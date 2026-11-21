@@ -77,34 +77,52 @@ function SyncEditorialSnapshot {
  }
  return @{action='editorial-sync';status='snapshot_ready';commit=$commit;staged=$true;testRoot=$destination;published=0}
 }
+# Run only the fixed editorial test script in a prepared isolated directory.
+# Redirect both streams asynchronously to avoid deadlocks. Do not show consoles.
+function Invoke-EditorialTestProcess([string]$workingDir) {
+ $psi=New-Object System.Diagnostics.ProcessStartInfo
+ $psi.FileName=Join-Path $env:SystemRoot 'System32\cmd.exe'
+ $psi.Arguments='/d /s /c "npm.cmd run editorial-tests"'
+ $psi.WorkingDirectory=$workingDir
+ $psi.UseShellExecute=$false
+ $psi.CreateNoWindow=$true
+ $psi.WindowStyle=[System.Diagnostics.ProcessWindowStyle]::Hidden
+ $psi.RedirectStandardOutput=$true
+ $psi.RedirectStandardError=$true
+ $process=New-Object System.Diagnostics.Process
+ $process.StartInfo=$psi
+ try {
+  if(-not $process.Start()){throw 'test_process_start_failed'}
+  $outputTask=$process.StandardOutput.ReadToEndAsync()
+  $errorTask=$process.StandardError.ReadToEndAsync()
+  if(-not $process.WaitForExit(120000)){
+   # Kill the cmd.exe child; npm/node descendants may require separate cleanup.
+   try{$process.Kill()}catch{}
+   return @{status='timed_out';exitCode=$null;summary=@{};published=0}
+  }
+  $process.WaitForExit()
+  $exitCode=[int]$process.ExitCode
+  $output=$outputTask.GetAwaiter().GetResult()
+  $errorTask.GetAwaiter().GetResult()
+  $counts=@{}
+  foreach($label in @('tests','pass','fail')){
+   $found=[regex]::Match($output,"(?m)^\s*(?:#|ℹ)\s*$label\s+(\d+)\s*$")
+   if($found.Success){$counts[$label]=[int]$found.Groups[1].Value}
+  }
+  $allPassed=($counts.ContainsKey('tests') -and $counts.ContainsKey('pass') -and $counts.ContainsKey('fail') -and $counts['tests'] -gt 0 -and $counts['tests'] -eq $counts['pass'] -and $counts['fail'] -eq 0)
+  $status='failed_or_unparsed'
+  if($exitCode -eq 0 -and $allPassed){$status='passed'}
+  # Deliberately do not publish the raw streams: they may contain credentials.
+  return @{status=$status;exitCode=$exitCode;summary=$counts;published=0}
+ } finally {$process.Dispose()}
+}
+
 function RunEditorialSnapshotTests([string]$root){
  $package=Join-Path $root 'm8-agent-node\package.json'
  if(-not(Test-Path -LiteralPath $package)){throw 'snapshot_package_missing'}
- $stdout=Join-Path $local 'snapshot-test-stdout.tmp'
- $stderr=Join-Path $local 'snapshot-test-stderr.tmp'
- try{
-  $process=Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','editorial-tests') -WorkingDirectory (Split-Path -Parent $package) -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-  if(-not $process.WaitForExit(120000)){
-   try{$process.Kill()}catch{}
-   return @{status='timed_out';published=0}
-  }
-  $process.Refresh()
-  $exitCode=$process.ExitCode
-  $output=Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue
-  $counts=@{}
-  foreach($label in @('tests','pass','fail')){
-   $match=[regex]::Match($output,"(?m)^[^\r\n]*?(?:#|ℹ)\s*$label\s+(\d+)\s*$")
-   if($match.Success){$counts[$label]=[int]$match.Groups[1].Value}
-  }
-  $valid=($counts.ContainsKey('tests') -and $counts.ContainsKey('pass') -and $counts.ContainsKey('fail') -and $counts['tests'] -eq $counts['pass'] -and $counts['fail'] -eq 0)
-  $state='failed_or_unparsed'
-  if($valid -and $null -eq $exitCode){$state='passed_output_only_exit_unknown'}
-  if($valid -and $null -ne $exitCode -and $exitCode -eq 0){$state='passed'}
-  return @{status=$state;summary=$counts;exitCode=$exitCode;published=0}
- }finally{
-  Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
- }
+ return Invoke-EditorialTestProcess -workingDir (Split-Path -Parent $package)
 }
+
 function Act([string]$name){
  if($name -eq 'editorial-sync'){return SyncEditorialSnapshot}
  if($name -eq 'editorial-sync-test'){
@@ -136,28 +154,10 @@ function Act([string]$name){
    if($found.Count -eq 1) {$packages=$found;$selectedRoot=$root;break}
   }
   if($packages.Count -ne 1){return @{action='editorial-tests';status='isolated_test_folder_missing_or_ambiguous';published=0}}
-  # Bound run time. Never upload raw logs or credentials to GitHub.
-  $outFile=Join-Path $local 'test-stdout.tmp'
-  $errFile=Join-Path $local 'test-stderr.tmp'
-  try {
-   $process=Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','editorial-tests') -WorkingDirectory $packages[0].Directory.FullName -NoNewWindow -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
-   if(-not $process.WaitForExit(120000)){
-    try{$process.Kill()}catch{}
-    return @{action='editorial-tests';status='timed_out';published=0}
-   }
-   $process.Refresh()
-   $exit=$process.ExitCode
-   $log=Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue
-  } finally {
-   Remove-Item -LiteralPath $outFile,$errFile -Force -ErrorAction SilentlyContinue
-  }
-  $data=@{}
-  foreach($key in @('tests','pass','fail')){
-   $m=[regex]::Match($log,"(?m)^[^\r\n]*?(?:#|ℹ)\s*$key\s+(\d+)\s*$")
-   if($m.Success){$data[$key]=[int]$m.Groups[1].Value}
-  }
-  $ok=($exit -eq 0 -and $data.ContainsKey('tests') -and $data.ContainsKey('pass') -and $data.ContainsKey('fail') -and $data['fail'] -eq 0 -and $data['tests'] -eq $data['pass'])
-  return @{action='editorial-tests';testRoot=$selectedRoot;status=$(if($ok){'passed'}else{'failed_or_unparsed'});summary=$data;exitCode=$exit;published=0}
+  $result=Invoke-EditorialTestProcess -workingDir $packages[0].Directory.FullName
+  $result['action']='editorial-tests'
+  $result['testRoot']=$selectedRoot
+  return $result
  }
  return @{status='action_denied';published=0}
 }
