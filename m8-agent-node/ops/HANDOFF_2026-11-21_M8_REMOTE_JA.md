@@ -21,3 +21,9 @@
 - 次：再起動・常駐安定性の確認。
 - その後は遠隔環境への過剰な機能追加ではなく、記事品質改善とアフィリエイト収益化の開発へ戻す。
 - ユーザーは本日作業終了を明示。今夜はこれ以上M8操作依頼をしない。
+
+## 2026-11-22 追記：無人テスト改善（作業ブランチ）
+- `m8-agent-node/ops/m8-remote-bridge.ps1` の `editorial-tests` と `editorial-sync-test` を共通の `Invoke-EditorialTestProcess` に統一。
+- PowerShell `Start-Process -NoNewWindow` から、.NET `ProcessStartInfo` の `CreateNoWindow=true`, `UseShellExecute=false`, `RedirectStandardOutput=true`, `RedirectStandardError=true` に切替。標準出力・標準エラーは非同期で収集し、終了コードは `Process.ExitCode` を取得する。GitHubには件数・結果だけを送る。
+- 120秒の上限を維持。旧版の空の黒いテストコンソールと exitCode=null の改善が目的。
+- **GitHub実装は済み、M8への反映・構文チェック・実機テストは未実施**。次にPS1をSHA固定のGitHub APIで取得し、Windows PowerShellのParserで構文チェック後、常駐タスクを再起動する。検証までは「修正完了」としない。
