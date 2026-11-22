@@ -20,21 +20,7 @@
     {
       "id": "datsudonburi",
       "repository": "tomsworkers16-web/datsudonburi-docs",
-      "baseBranch": "dev/agent-proposals",
-      "enabled": false,
-      "rules": [
-        "AGENTS.md",
-        "CLAUDE.md"
-      ],
-      "allowedPaths": [
-        "docs/"
-      ],
-      "testCommand": "npm test"
-    },
-    {
-      "id": "utility-plus",
-      "repository": "tomsworkers16-web/AI_Factory_Round19",
-      "baseBranch": "dev/agent-proposals",
+      "baseBranch": "setup/ai-collaboration-v2",
       "enabled": false,
       "rules": [
         "AGENTS.md",
@@ -48,7 +34,7 @@
     {
       "id": "yamashita-pilot",
       "repository": "tomsworkers16-web/yamashita-udon-pilot",
-      "baseBranch": "dev/agent-proposals",
+      "baseBranch": "m8-media-storage",
       "enabled": false,
       "rules": [
         "AGENTS.md",
