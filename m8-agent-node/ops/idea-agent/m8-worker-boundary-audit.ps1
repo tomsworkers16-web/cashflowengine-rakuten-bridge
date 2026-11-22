@@ -32,8 +32,9 @@ try {
   sandboxRoots=@($isolatedRoots | ForEach-Object { @{path=$_;status=(Test-Readable $_)} });
  }
  # Access is assessed in the CURRENT identity, never guessed for another user.
- $checks.workerIsolationPassed=($admin -eq $false -and $checks.productionTree -eq 'denied' -and $checks.remoteControlTree -eq 'denied' -and $checks.githubCredentialPath -ne 'accessible' -and $checks.codexAvailable -and $checks.gitAvailable -and $checks.nodeAvailable)
- $checks.interpretation='Read-only observation under current Windows identity. A dedicated low-privilege identity must be tested separately.'
+ $checks.preliminaryChecksPass=($admin -eq $false -and $checks.productionTree -eq 'denied' -and $checks.remoteControlTree -eq 'denied' -and $checks.githubCredentialPath -ne 'accessible' -and $checks.codexAvailable -and $checks.gitAvailable -and $checks.nodeAvailable)
+ $checks.workerIsolationPassed=$false
+ $checks.interpretation='Read-only observation under current Windows identity. This is NOT an OS permission attestation. A dedicated low-privilege identity requires independent negative access and sandbox tests before activation.'
  $checks | ConvertTo-Json -Depth 6
 }catch{
  '{"version":"m8-worker-boundary-audit-v1","workerIsolationPassed":false,"error":"audit_failed"}'
