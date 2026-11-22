@@ -1,7 +1,7 @@
 // Converts a vetted GitHub idea issue into a bounded Codex implementation job.
 import {intakeIdea} from './idea-intake-core.mjs';
 import {validateJob,BASE_BRANCH} from './coding-agent-core.mjs';
-export function createCodingJob(issue,baseCommit,{timeoutSeconds=600}={}) {
+export function createCodingJob(issue,baseCommit,{timeoutSeconds=600,baseBranch=BASE_BRANCH}={}) {
  const intake=intakeIdea(issue);
  if(!intake.accepted)throw Error('idea_not_accepted');
  const id='IDEA-'+String(issue.number);
@@ -17,9 +17,9 @@ export function createCodingJob(issue,baseCommit,{timeoutSeconds=600}={}) {
   'Add a concise automated test. Do not install dependencies. Stop if changes require protected credentials.'
  ].join('\n');
  return validateJob({
-  id,prompt,baseBranch:BASE_BRANCH,
+  id,prompt,baseBranch,
   branch:'agent/idea-'+issue.number+'-implementation',
   baseCommit,allowPublish:false,allowMainMerge:false,allowProduction:false,
   timeoutSeconds
- });
+ },{baseBranch});
 }
