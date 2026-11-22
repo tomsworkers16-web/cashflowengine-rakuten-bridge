@@ -29,14 +29,14 @@
     "threads-hook-diagnostics": "node src/report-threads-hooks.js",
     "threads-age-matched": "node src/report-threads-age-matched.js",
     "editorial-articles": "node src/run-editorial-article-workflow.js",
-    "editorial-tests": "node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.test.js test/editorial-research-drafter.test.js test/editorial-rakuten-evidence.test.js test/editorial-llm-adapter.test.js test/editorial-ai-workflow.test.js test/editorial-rakuten-research.test.js test/editorial-shortlist.test.js test/editorial-page-verifier.test.js test/editorial-spec-extractor.test.js test/editorial-pinned-draft.test.js test/editorial-genre-discovery.test.js test/editorial-rangehood-evidence.test.js test/editorial-vacuum-evidence.test.js test/editorial-vacuum-size-chart.test.js test/editorial-queue-planner.test.js ops/idea-agent/idea-intake-core.test.mjs ops/idea-agent/idea-triage-worker.test.mjs ops/idea-agent/coding-agent-core.test.mjs ops/idea-agent/coding-agent-runner.test.mjs",
+    "editorial-tests": "node --test test/editorial-quality-gate.test.js test/editorial-article-workflow.test.js test/editorial-research-drafter.test.js test/editorial-rakuten-evidence.test.js test/editorial-llm-adapter.test.js test/editorial-ai-workflow.test.js test/editorial-rakuten-research.test.js test/editorial-shortlist.test.js test/editorial-page-verifier.test.js test/editorial-spec-extractor.test.js test/editorial-pinned-draft.test.js test/editorial-genre-discovery.test.js test/editorial-rangehood-evidence.test.js test/editorial-vacuum-evidence.test.js test/editorial-vacuum-size-chart.test.js test/editorial-queue-planner.test.js ops/idea-agent/idea-intake-core.test.mjs ops/idea-agent/idea-triage-worker.test.mjs ops/idea-agent/coding-agent-core.test.mjs ops/idea-agent/coding-agent-runner.test.mjs ops/idea-agent/coding-agent-job-builder.test.mjs",
     "editorial-rakuten-research": "node --env-file=.env src/run-editorial-rakuten-research.js",
     "editorial-pinned-draft": "node --env-file=.env src/run-editorial-pinned-draft.js",
     "editorial-genre-discovery": "node --env-file=.env src/run-editorial-genre-discovery.js",
     "editorial-rangehood-evidence": "node --env-file=.env src/run-editorial-rangehood-evidence.js",
     "editorial-vacuum-evidence": "node --env-file=.env src/run-editorial-vacuum-evidence.js",
     "idea-intake-tests": "node --test ops/idea-agent/*.test.mjs",
-    "coding-agent-tests": "node --test ops/idea-agent/coding-agent-core.test.mjs ops/idea-agent/coding-agent-runner.test.mjs"
+    "coding-agent-tests": "node --test ops/idea-agent/coding-agent-core.test.mjs ops/idea-agent/coding-agent-runner.test.mjs ops/idea-agent/coding-agent-job-builder.test.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
