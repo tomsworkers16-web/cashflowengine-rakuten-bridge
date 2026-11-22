@@ -38,3 +38,9 @@
 - 重要：現行タスクはログオン時起動で、常駐PowerShell本体の黒い画面を閉じると通信断になる可能性がある。ユーザーにはまだ画面を閉じさせない。
 - 安全ルール：本番Threads投稿とM8稼働中プログラムを変更しない。GitHub開発ブランチだけを編集し、mainマージ・本番反映はオーナー承認必須。M8への新しいコード反映前は必ずPowerShell構文チェック。
 - ユーザーは「もう寝る」と明示している。今夜は追加操作を求めない。
+
+## 2026-11-22 日中追記
+- **Issue #18: Closed / tests=76, pass=76, fail=0, exitCode=0, status=passed**。隔離スナップショット `eef89eb1eeb63f42707088d9ca92fdb8269cf0ad` にてM8上の最新版記事生成テスト成功。実測完了。
+- **Issue #19: Closed**。ChatGPT指示 → 常駐M8のhealth実行 → 結果GitHub返送まで、ユーザーのM8操作なしで再確認。Node利用可能、ローカル18787 TCP接続可。
+- 黒い常駐PowerShell画面の非表示ランチャー（`m8-agent-node/ops/m8-remote-hidden-launcher.vbs`）と導入/ロールバック手順（`m8-agent-node/ops/M8_HIDDEN_LAUNCH_JA.md`）を**開発ブランチに準備**。実機導入は**未実施**。既存ウィンドウが手動起動のPowerShellである可能性があり、不要なタスク変更は避ける。
+- 次回は必要なら画面非表示のタスク設定を、オーナー承認の上で適用・GitHubヘルスチェック実証。それ以外はM8遠隔基盤に過剰投資せず、Cash Flow Engineの記事・アフィリエイト収益化へ戻す。
