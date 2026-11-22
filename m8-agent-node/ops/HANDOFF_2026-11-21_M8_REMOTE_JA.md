@@ -62,3 +62,12 @@
 - 現在準備した次工程：`m8-agent-node/ops/idea-agent/m8-idea-003-export-review.ps1` を追加。M8ローカルの `C:\CFE-Coding-Agent-PoC-30\workspace` から**指定2ファイルだけ**読み、差分件数・パス・サイズ・リスク文字列を検証し、テスト再実行後、DPAPI保存済みPATで**非公開**GitHub Issue #30へBase64形式で成果物を記録。トークンはGitHub Issueに記録しない。重複投稿を抑止。ソース作業ディレクトリや本番は変更しない。
 - スクリプトはGitHub上で準備済みだが、**実機起動未実施**。M8での実行が必要。GitHubに収集後はChatGPTが2ファイルをレビューして作業ブランチへ反映し、隔離テストする。
 - 構成変更禁止：main・本番・Threads投稿・有料契約はオーナー承認を維持。
+
+## 2026-11-22：IDEA-003生成物の回収・レビュー・開発ブランチ反映まで実証
+- オーナーがM8で `RESULT: IDEA_003_REVIEW_EXPORTED`、対象は非公開Issue #30。GitHubコメント #7075511103 に限定された2ファイル（Base64転送）が存在することをChatGPT側で確認。
+- `job-metrics.mjs`・`job-metrics.test.mjs` をレビューし、外部通信等の危険操作がないこと、合計値の検査・不正値での例外・成功/失敗の返却を確認。
+- ChatGPTが開発ブランチ `docs/editorial-quality-gate-b-20261116` へ2ファイルを追加し、`m8-agent-node/package.json` の `editorial-tests` に新規テストを登録。対象コミット `67c77d9623b2ce61afb8b2ee36973f798b03fefa`。
+- 非公開M8指示Issue #32が自動処理され、**118/118件成功、失敗0、exitCode=0、published=0**。Issue #30を実装完了でClose。main・本番・Threads投稿には一切変更なし。
+- 実証された経路：スマホ等からIDEAを登録 → Issueの作成者検証 → GitHub開発ソースの隔離取得 → Codex実コード生成 → 差分検査・実コードテスト → 非公開Issueへ2ファイル転送 → ChatGPTがソースレビューして開発ブランチへ反映 → M8回帰テスト合格。
+- **未実現**：この各段階をChatGPTが不在でも自動でつなぎ、同時実行を管理・再試行・安全なレビュー/PR作成を行う常駐エージェント。現状はユーザーによるM8のワンショット操作とChatGPT側の反映が必要。
+- 次の優先事項：専用常駐ワーカーを隔離権限で動かすため、ジョブ排他・上限・承認ゲート・アウトプット検証を持つ最小の統合ランナーを作り、1件だけ無人PoCを試す。既存ブリッジは変更・権限拡張しない。
