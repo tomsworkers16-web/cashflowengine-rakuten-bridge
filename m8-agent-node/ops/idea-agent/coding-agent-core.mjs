@@ -36,7 +36,7 @@ export function codexInvocation(job) {
  'Task '+safe.id+': '+safe.prompt,
  'Return a concise Japanese summary of changes and tests.',
  ].join('\n');
- return {command:'codex',args:['exec','--ephemeral','--ignore-user-config','--sandbox','workspace-write','--ask-for-approval','never',prompt]};
+ return {command:'codex',args:['exec','--ephemeral','--ignore-user-config','--sandbox','workspace-write','--ask-for-approval','never','-'],input:prompt};
 }
 export function sanitizeEnvironment(env={}) {
  const clean={};
