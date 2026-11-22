@@ -1,0 +1,17 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {intakeIdea,renderPlanMarkdown,OWNER_ID} from './idea-intake-core.mjs';
+const issue={number:20,user:{id:OWNER_ID},title:'[IDEA-001] 記事を改善',body:'商品紹介記事の比較表を自動で生成したい。',labels:[]};
+test('valid issue triages as scoped without executing',()=>{const p=intakeIdea(issue);assert.equal(p.accepted,true);assert.equal(p.status,'Scoped');assert.equal(p.priority,'P2');assert.match(renderPlanMarkdown(p),/自動分類/);});
+test('income-related idea increases priority',()=>{const p=intakeIdea({...issue,body:'楽天の記事のクリック率と収益を改善したい'});assert.equal(p.priority,'P1')});
+test('incident is prioritized',()=>{const p=intakeIdea({...issue,body:'投稿エラーを修正する'});assert.equal(p.priority,'P0')});
+test('main/publishing requires approval',()=>{const p=intakeIdea({...issue,body:'本番に投稿したい'});assert.equal(p.approvalRequired,true)});
+test('rejects external author',()=>assert.equal(intakeIdea({...issue,user:{id:1}}).reason,'unauthorized_author'));
+test('rejects non-idea',()=>assert.equal(intakeIdea({...issue,title:'[M8-REMOTE] test'}).reason,'not_idea'));
+test('rejects m8 execution labeled issue',()=>assert.equal(intakeIdea({...issue,labels:[{name:'m8-remote'}]}).reason,'control_action_label'));
+test('rejects pull request',()=>assert.equal(intakeIdea({...issue,pull_request:{}}).reason,'pull_request'));
+test('rejects potential secrets',()=>assert.equal(intakeIdea({...issue,body:'my password is secret'}).reason,'contains_potential_secret'));
+test('rejects empty body',()=>assert.equal(intakeIdea({...issue,body:''}).reason,'invalid_content_length'));
+test('rejects huge body',()=>assert.equal(intakeIdea({...issue,body:'x'.repeat(12001)}).reason,'invalid_content_length'));
+test('rejects malformed issue',()=>assert.throws(()=>intakeIdea(null),/invalid_issue/));
+test('renders escaped user supplied summary',()=>assert.match(renderPlanMarkdown(intakeIdea({...issue,body:'<script>alert(1)</script>'})),/&lt;script&gt;/));
