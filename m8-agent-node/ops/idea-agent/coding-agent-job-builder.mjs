@@ -14,7 +14,7 @@ export function createCodingJob(issue,baseCommit,{timeoutSeconds=600}={}) {
   'Task summary: '+summary,
   'Acceptance criteria: '+intake.acceptance.join('; '),
   'The user must explicitly approve production/publication, merging into main, payments and external messages.',
-  'Add a concise automated test. Do not install dependencies. Stop if changes require secrets.'
+  'Add a concise automated test. Do not install dependencies. Stop if changes require protected credentials.'
  ].join('\n');
  return validateJob({
   id,prompt,baseBranch:BASE_BRANCH,
