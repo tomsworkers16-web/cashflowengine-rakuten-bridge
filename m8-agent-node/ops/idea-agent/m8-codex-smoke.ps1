@@ -1,7 +1,7 @@
 # One-time sandboxed Codex smoke test on M8. Does not access or modify production.
 # Test workspace is C:\CFE-Codex-PoC, independent of existing Git repos.
 $ErrorActionPreference = 'Stop'
-$root = 'C:\CFE-Codex-PoC'
+$root = 'C:\CFE-Codex-PoC-v2'
 $git = Get-Command git.exe -ErrorAction SilentlyContinue
 $codex = Get-Command codex.cmd -ErrorAction SilentlyContinue
 if (-not $git) { Write-Host 'RESULT: GIT_MISSING'; exit 2 }
@@ -25,7 +25,7 @@ try {
   $stderr = Join-Path $root 'codex.stderr.txt'
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = (Join-Path $env:SystemRoot 'System32\cmd.exe')
-  $psi.Arguments = '/d /s /c "codex.cmd exec --ephemeral --ignore-user-config --sandbox workspace-write --ask-for-approval never -"'
+  $psi.Arguments = '/d /s /c "codex.cmd exec --sandbox workspace-write -"'
   $psi.WorkingDirectory = $root
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
