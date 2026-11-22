@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "id": "cashflow",
+      "repository": "tomsworkers16-web/cashflowengine-rakuten-bridge",
+      "baseBranch": "docs/editorial-quality-gate-b-20261116",
+      "enabled": true,
+      "rules": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "allowedPaths": [
+        "m8-agent-node/ops/idea-agent/",
+        "m8-agent-node/src/",
+        "m8-agent-node/test/"
+      ],
+      "testCommand": "npm run editorial-tests"
+    },
+    {
+      "id": "datsudonburi",
+      "repository": "tomsworkers16-web/datsudonburi-docs",
+      "baseBranch": "dev/agent-proposals",
+      "enabled": false,
+      "rules": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "allowedPaths": [
+        "docs/"
+      ],
+      "testCommand": "npm test"
+    },
+    {
+      "id": "utility-plus",
+      "repository": "tomsworkers16-web/AI_Factory_Round19",
+      "baseBranch": "dev/agent-proposals",
+      "enabled": false,
+      "rules": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "allowedPaths": [
+        "docs/"
+      ],
+      "testCommand": "npm test"
+    },
+    {
+      "id": "yamashita-pilot",
+      "repository": "tomsworkers16-web/yamashita-udon-pilot",
+      "baseBranch": "dev/agent-proposals",
+      "enabled": false,
+      "rules": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "allowedPaths": [
+        "docs/"
+      ],
+      "testCommand": "npm test"
+    }
+  ]
+}
