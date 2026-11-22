@@ -3,6 +3,7 @@ import {readFileSync,realpathSync,mkdirSync,rmdirSync,existsSync} from 'node:fs'
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {validateJob,checkWorkspace,codexInvocation,sanitizeEnvironment,classifyDiffFiles} from './coding-agent-core.mjs';
+import {selectProject,reviewChangedPaths} from './project-registry.mjs';
 const configFile=process.argv[2],workspaceArg=process.argv[3];
 const execute=process.argv.includes('--execute');
 const refusal=(message)=>{process.stdout.write(JSON.stringify({status:'blocked',reason:message})+'\n');process.exitCode=2;};
@@ -18,16 +19,24 @@ function inspectedChanges(cwd) {
 }
 try {
  if(!configFile||!workspaceArg)throw Error('usage_job_json_workspace');
- const job=validateJob(JSON.parse(readFileSync(configFile,'utf8')));
+ const rawJob=JSON.parse(readFileSync(configFile,'utf8'));
+ const registry=JSON.parse(readFileSync(new URL('./project-registry.json',import.meta.url),'utf8'));
+ const project=rawJob?.projectId?selectProject(registry,rawJob.projectId):null;
+ if(project && (rawJob.repository!==project.repository || rawJob.baseBranch!==project.baseBranch || JSON.stringify(rawJob.allowedPaths)!==JSON.stringify(project.allowedPaths)))throw Error('project_binding_mismatch');
+ const job=validateJob(rawJob,{baseBranch:project?.baseBranch});
  const root=process.env.CFE_ISOLATION_ROOT;
  if(!root)throw Error('missing_isolation_root');
  const work=checkWorkspace(realpathSync(resolve(workspaceArg)),realpathSync(resolve(root)));
  if(git(work,'rev-parse','--is-inside-work-tree')!=='true')throw Error('not_git_worktree');
+ if(project){
+  const remote=git(work,'remote','get-url','origin');
+  if(remote!=='https://github.com/'+project.repository+'.git' && remote!=='git@github.com:'+project.repository+'.git')throw Error('git_remote_mismatch');
+ }
  const branch=git(work,'branch','--show-current');
  if(branch!==job.branch)throw Error('unexpected_checkout_branch');
  if(git(work,'rev-parse','HEAD')!==job.baseCommit)throw Error('checkout_commit_mismatch');
  if(inspectedChanges(work).length)throw Error('worktree_not_clean');
- const {command,args}=codexInvocation(job);
+ const {command,args}=codexInvocation(job,{baseBranch:project?.baseBranch});
  if(!execute){
   process.stdout.write(JSON.stringify({status:'dry_run',id:job.id,workspace:work,branch,command,arguments:args.slice(0,-1),timeoutSeconds:job.timeoutSeconds,willPush:false})+'\n');
  } else {
@@ -39,12 +48,13 @@ try {
    // Windows npm installs expose codex.cmd. Only fixed trusted flags reach cmd.exe; task text is stdin.
    const exe=process.platform==='win32'?(process.env.ComSpec||'C:\\Windows\\System32\\cmd.exe'):command;
    const invocation=process.platform==='win32'?['/d','/s','/c','codex.cmd exec --sandbox workspace-write -']:args;
-   const runner=spawnSync(exe,invocation,{cwd:work,input:codexInvocation(job).input,encoding:'utf8',windowsHide:true,env:sanitizeEnvironment(process.env),timeout:job.timeoutSeconds*1000,maxBuffer:1024*1024});
+   const runner=spawnSync(exe,invocation,{cwd:work,input:codexInvocation(job,{baseBranch:project?.baseBranch}).input,encoding:'utf8',windowsHide:true,env:sanitizeEnvironment(process.env),timeout:job.timeoutSeconds*1000,maxBuffer:1024*1024});
    // Do not persist or upload Codex output; it could contain confidential material.
    const modified=inspectedChanges(work);
    const diffGate=classifyDiffFiles(modified);
-   const ok=(!runner.error&&runner.status===0&&diffGate.accepted);
-   process.stdout.write(JSON.stringify({status:ok?'review_required':'blocked',id:job.id,exitCode:runner.status,changedFileCount:modified.length,diffAllowed:diffGate.accepted,forbiddenCount:diffGate.forbidden.length,executionTimedOut:runner.error?.code==='ETIMEDOUT',pushed:false,productionChanged:false})+'\n');
+   const projectGate=project?reviewChangedPaths(project,modified):{accepted:true,forbidden:[]};
+   const ok=(!runner.error&&runner.status===0&&diffGate.accepted&&projectGate.accepted);
+   process.stdout.write(JSON.stringify({status:ok?'review_required':'blocked',id:job.id,exitCode:runner.status,changedFileCount:modified.length,diffAllowed:diffGate.accepted,forbiddenCount:diffGate.forbidden.length+projectGate.forbidden.length,executionTimedOut:runner.error?.code==='ETIMEDOUT',pushed:false,productionChanged:false})+'\n');
    if(!ok)process.exitCode=2;
   }finally{rmdirSync(lock)}
  }
