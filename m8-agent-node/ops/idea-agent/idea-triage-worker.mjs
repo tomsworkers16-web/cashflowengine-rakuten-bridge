@@ -2,6 +2,7 @@
 // No AI API, no shell execution, no code modifications, no main/production actions.
 // Environment: GH_TOKEN (Issues read/write only for the control repository).
 import {intakeIdea,renderPlanMarkdown,OWNER_ID} from './idea-intake-core.mjs';
+import {pathToFileURL} from 'node:url';
 const REPO='tomsworkers16-web/cfe-m8-control';
 const BASE='https://api.github.com/repos/'+REPO;
 const marker='<!-- AstonishFactory:idea-intake:v1 -->';
@@ -38,7 +39,7 @@ export async function run({send=api,write=apply}={}) {
   }
   return {mode:write?'apply':'dry-run',processed:results.length,results};
 }
-if(process.argv[1] && import.meta.url === new URL('file://'+process.argv[1]).href) {
+if(process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   run().then(x=>process.stdout.write(JSON.stringify(x)+'\n')).catch(e=>{
     process.stderr.write('triage_failed: '+(String(e.message).startsWith('github_http_')?e.message:'internal_error')+'\n');process.exitCode=1;
   });
