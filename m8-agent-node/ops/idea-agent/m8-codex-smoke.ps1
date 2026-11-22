@@ -25,16 +25,19 @@ try {
   $stderr = Join-Path $root 'codex.stderr.txt'
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = (Join-Path $env:SystemRoot 'System32\cmd.exe')
-  $psi.Arguments = '/d /s /c "codex.cmd exec --ephemeral --ignore-user-config --sandbox workspace-write --ask-for-approval never ' + '"' + $prompt.Replace('"','') + '""'
+  $psi.Arguments = '/d /s /c "codex.cmd exec --ephemeral --ignore-user-config --sandbox workspace-write --ask-for-approval never -"'
   $psi.WorkingDirectory = $root
   $psi.UseShellExecute = $false
   $psi.CreateNoWindow = $true
+  $psi.RedirectStandardInput = $true
   $psi.RedirectStandardOutput = $true
   $psi.RedirectStandardError = $true
   $p = New-Object System.Diagnostics.Process
   $p.StartInfo = $psi
   try {
     if (-not $p.Start()) { throw 'codex_start_failed' }
+    $p.StandardInput.WriteLine($prompt)
+    $p.StandardInput.Close()
     $outTask = $p.StandardOutput.ReadToEndAsync()
     $errTask = $p.StandardError.ReadToEndAsync()
     if (-not $p.WaitForExit(180000)) {
