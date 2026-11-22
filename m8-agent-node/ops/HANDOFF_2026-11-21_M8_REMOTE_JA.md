@@ -54,3 +54,11 @@
 - **未実施**：M8 Codex CLI インストール・ログイン状態確認、隔離Gitワークツリー構築、実Codexによる変更・再テスト、常駐自律実装、PRの自動レビュー、完全なOS隔離。
 - 注意：Codex CLIの利用をM8で試す前に、料金/APIキー認証ではなく既存ChatGPT認証が使えるか確認する必要あり。Windows上の`codex.cmd`起動方法は未検証。現行M8遠隔ブリッジのホワイトリストは変更しない。
 - 現在の次の一手：一度だけM8で`Get-Command codex`と`codex login status`を確認し、隔離ワークツリーの実行PoCへ進む。
+
+## 2026-11-22 午後：IDEA-003統合試験合格、成果物回収へ
+- オーナーがM8で `m8-idea-003-onejob.ps1` を実施：`RESULT: IDEA_003_IMPLEMENTATION_PASSED`、変更ファイル2件、push/merge/本番公開なし。非公開Issue #30に記録済み。
+- この結果で実証された経路：非公開GitHub Issue #30→作成者ID確認→M8隔離git clone→専用 `agent/idea-30-implementation` ブランチ→受付Issueから開発Job生成→Codexが新規ファイル2件生成→許可済み差分だけであること確認→生成したNodeテスト成功。
+- 完了していない経路：生成成果物のGitHub開発ブランチへの取り込み、レビュー用PR、チャット不在時の自動受付・実装継続、複数ジョブ管理。
+- 現在準備した次工程：`m8-agent-node/ops/idea-agent/m8-idea-003-export-review.ps1` を追加。M8ローカルの `C:\CFE-Coding-Agent-PoC-30\workspace` から**指定2ファイルだけ**読み、差分件数・パス・サイズ・リスク文字列を検証し、テスト再実行後、DPAPI保存済みPATで**非公開**GitHub Issue #30へBase64形式で成果物を記録。トークンはGitHub Issueに記録しない。重複投稿を抑止。ソース作業ディレクトリや本番は変更しない。
+- スクリプトはGitHub上で準備済みだが、**実機起動未実施**。M8での実行が必要。GitHubに収集後はChatGPTが2ファイルをレビューして作業ブランチへ反映し、隔離テストする。
+- 構成変更禁止：main・本番・Threads投稿・有料契約はオーナー承認を維持。
