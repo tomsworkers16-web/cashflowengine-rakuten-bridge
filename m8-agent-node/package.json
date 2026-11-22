@@ -40,7 +40,8 @@
     "idea-003-tests": "node --test ops/idea-agent/job-metrics.test.mjs",
     "auto-queue-tests": "node --test ops/idea-agent/auto-queue.test.mjs",
     "auto-worker-tests": "node --test ops/idea-agent/auto-queue.test.mjs ops/idea-agent/one-job-orchestrator.test.mjs",
-    "editorial-performance-tests": "node --test test/editorial-performance-priority.test.js"
+    "editorial-performance-tests": "node --test test/editorial-performance-priority.test.js",
+    "editorial-performance": "node src/run-editorial-performance-priority.js"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
