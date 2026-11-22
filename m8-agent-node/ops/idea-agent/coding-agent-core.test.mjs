@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {validateJob,checkWorkspace,codexInvocation,sanitizeEnvironment,classifyDiffFiles,BASE_BRANCH} from './coding-agent-core.mjs';
+const job={id:'IDEA-23',prompt:'隔離ワークツリー内で安全なコード変更とテストを実施する。',baseBranch:BASE_BRANCH,branch:'agent/idea-23-safe-implementation',baseCommit:'a'.repeat(40),allowPublish:false,allowMainMerge:false,allowProduction:false,timeoutSeconds:300};
+test('safe bounded job',()=>{const x=validateJob(job);assert.equal(x.id,'IDEA-23');assert.equal(x.branch,job.branch)});
+test('wrong branch denied',()=>assert.throws(()=>validateJob({...job,branch:'main'}),/invalid_work_branch/));
+test('cross issue branch denied',()=>assert.throws(()=>validateJob({...job,branch:'agent/idea-3-safe'}),/invalid_work_branch/));
+test('production permission denied',()=>assert.throws(()=>validateJob({...job,allowProduction:true}),/unsafe_permissions/));
+test('timeout limit enforced',()=>assert.throws(()=>validateJob({...job,timeoutSeconds:10000}),/invalid_timeout/));
+test('secrets in prompt rejected',()=>assert.throws(()=>validateJob({...job,prompt:'Please use my github_pat_AAAAAAAAAAAAAAAAAAAA for access'}),/invalid_prompt/));
+test('isolation requires child workspace',()=>assert.throws(()=>checkWorkspace('C:\\A\\prod','C:\\A\\sandbox'),/workspace_outside_isolation|invalid_workspace/));
+test('requires absolute workspace',()=>assert.throws(()=>checkWorkspace('relative','C:\\sandbox'),/invalid_workspace/));
+test('builds workspace-write command and no yolo',()=>{const cmd=codexInvocation(job);assert.equal(cmd.command,'codex');assert.ok(cmd.args.includes('workspace-write'));assert.ok(!cmd.args.includes('--yolo'));assert.ok(cmd.args.join(' ').includes('Task IDEA-23'))});
+test('filters secrets from child environment',()=>{const env=sanitizeEnvironment({PATH:'test',GH_TOKEN:'sensitive',OPENAI_API_KEY:'sensitive',CODEX_API_KEY:'sensitive'});assert.equal(env.PATH,'test');assert.equal(env.GH_TOKEN,undefined);assert.equal(env.OPENAI_API_KEY,undefined)});
+test('blocks sensitive files',()=>{const x=classifyDiffFiles(['src/test.js','.github/workflows/release.yml','.env']);assert.equal(x.accepted,false);assert.equal(x.forbidden.length,2)});
+test('allows ordinary files',()=>assert.equal(classifyDiffFiles(['src/test.js','test/case.test.js']).accepted,true));
