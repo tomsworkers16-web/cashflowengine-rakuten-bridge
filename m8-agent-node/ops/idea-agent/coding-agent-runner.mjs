@@ -36,7 +36,10 @@ try {
   if(existsSync(lock))throw Error('job_lock_held');
   mkdirSync(lock);
   try {
-   const runner=spawnSync(command,args,{cwd:work,encoding:'utf8',windowsHide:true,env:sanitizeEnvironment(process.env),timeout:job.timeoutSeconds*1000,maxBuffer:1024*1024});
+   // Windows npm installs expose codex.cmd. Only fixed trusted flags reach cmd.exe; task text is stdin.
+   const exe=process.platform==='win32'?(process.env.ComSpec||'C:\\Windows\\System32\\cmd.exe'):command;
+   const invocation=process.platform==='win32'?['/d','/s','/c','codex.cmd exec --ephemeral --ignore-user-config --sandbox workspace-write --ask-for-approval never -']:args;
+   const runner=spawnSync(exe,invocation,{cwd:work,input:codexInvocation(job).input,encoding:'utf8',windowsHide:true,env:sanitizeEnvironment(process.env),timeout:job.timeoutSeconds*1000,maxBuffer:1024*1024});
    // Do not persist or upload Codex output; it could contain confidential material.
    const modified=inspectedChanges(work);
    const diffGate=classifyDiffFiles(modified);
