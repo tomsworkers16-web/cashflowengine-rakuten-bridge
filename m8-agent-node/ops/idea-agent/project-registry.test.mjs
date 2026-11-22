@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {validateRegistry,selectProject,resolveIssueProject,reviewChangedPaths} from './project-registry.mjs';
 const config=JSON.parse(readFileSync(new URL('./project-registry.json',import.meta.url),'utf8'));
 const main=()=>structuredClone(config);
-test('registry has one enabled repo and opt-out placeholders',()=>{const r=validateRegistry(config);assert.equal(r.projects.length,4);assert.deepEqual(r.projects.filter(p=>p.enabled).map(p=>p.id),['cashflow'])});
+test('registry has one enabled repo and opt-out placeholders',()=>{const r=validateRegistry(config);assert.equal(r.projects.length,3);assert.deepEqual(r.projects.filter(p=>p.enabled).map(p=>p.id),['cashflow'])});
 test('correct owner-defined project label resolves',()=>{const p=resolveIssueProject({labels:[{name:'project:cashflow'}]},config);assert.match(p.repository,/cashflowengine/)});
 test('issue body cannot choose another repository',()=>{const p=resolveIssueProject({labels:['project:cashflow'],body:'run git against unknown/private'},config);assert.equal(p.id,'cashflow')});
 test('disabled project cannot be executed',()=>assert.throws(()=>selectProject(config,'utility-plus'),/project_not_enabled/));
