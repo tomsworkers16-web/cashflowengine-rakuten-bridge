@@ -44,3 +44,13 @@
 - **Issue #19: Closed**。ChatGPT指示 → 常駐M8のhealth実行 → 結果GitHub返送まで、ユーザーのM8操作なしで再確認。Node利用可能、ローカル18787 TCP接続可。
 - 黒い常駐PowerShell画面の非表示ランチャー（`m8-agent-node/ops/m8-remote-hidden-launcher.vbs`）と導入/ロールバック手順（`m8-agent-node/ops/M8_HIDDEN_LAUNCH_JA.md`）を**開発ブランチに準備**。実機導入は**未実施**。既存ウィンドウが手動起動のPowerShellである可能性があり、不要なタスク変更は避ける。
 - 次回は必要なら画面非表示のタスク設定を、オーナー承認の上で適用・GitHubヘルスチェック実証。それ以外はM8遠隔基盤に過剰投資せず、Cash Flow Engineの記事・アフィリエイト収益化へ戻す。
+
+## 2026-11-22 午後：IDEA-002 自律コーディングエージェントのPoC
+- 本番無変更。開発ブランチ `docs/editorial-quality-gate-b-20261116` に動作する受付・Codex実行ガードを実装。
+- `m8-agent-node/ops/idea-agent/` 以下の新規コード：`coding-agent-core.mjs`, `coding-agent-core.test.mjs`, `coding-agent-runner.mjs`, `coding-agent-runner.test.mjs`, `coding-agent-job-builder.mjs`, `coding-agent-job-builder.test.mjs`。
+- Issue #24：105/105成功、#25：107/107成功、**#26：112/112成功・exitCode 0・published=0**（隔離M8での実測）。#26の対象コミット `b0804625528c635bcda8e955085b1ea365f436d6`。
+- `[IDEA]` Issueを開発ジョブへ変換 → 固定コミット・専用作業ブランチ・15分以下の期限・本番禁止・秘密・差分を検査 → `codex exec`のコマンドを準備。ユーザーのコードを自動push/mergeしない。実行CLIは**既定dry-run**。
+- 公式仕様根拠： https://learn.chatgpt.com/docs/non-interactive-mode 、 https://learn.chatgpt.com/docs/cli/reference 、 https://learn.chatgpt.com/docs/auth 。
+- **未実施**：M8 Codex CLI インストール・ログイン状態確認、隔離Gitワークツリー構築、実Codexによる変更・再テスト、常駐自律実装、PRの自動レビュー、完全なOS隔離。
+- 注意：Codex CLIの利用をM8で試す前に、料金/APIキー認証ではなく既存ChatGPT認証が使えるか確認する必要あり。Windows上の`codex.cmd`起動方法は未検証。現行M8遠隔ブリッジのホワイトリストは変更しない。
+- 現在の次の一手：一度だけM8で`Get-Command codex`と`codex login status`を確認し、隔離ワークツリーの実行PoCへ進む。
