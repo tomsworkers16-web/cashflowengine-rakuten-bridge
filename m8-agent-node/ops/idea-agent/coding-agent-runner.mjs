@@ -4,6 +4,7 @@ import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {validateJob,checkWorkspace,codexInvocation,sanitizeEnvironment,classifyDiffFiles} from './coding-agent-core.mjs';
 import {selectProject,reviewChangedPaths} from './project-registry.mjs';
+import {buildWorkerCodexLaunch} from './worker-codex-launch.mjs';
 const configFile=process.argv[2],workspaceArg=process.argv[3];
 const execute=process.argv.includes('--execute');
 const refusal=(message)=>{process.stdout.write(JSON.stringify({status:'blocked',reason:message})+'\n');process.exitCode=2;};
@@ -45,10 +46,10 @@ try {
   if(existsSync(lock))throw Error('job_lock_held');
   mkdirSync(lock);
   try {
-   // Windows npm installs expose codex.cmd. Only fixed trusted flags reach cmd.exe; task text is stdin.
-   const exe=process.platform==='win32'?(process.env.ComSpec||'C:\\Windows\\System32\\cmd.exe'):command;
-   const invocation=process.platform==='win32'?['/d','/s','/c','codex.cmd exec --sandbox workspace-write -']:args;
-   const runner=spawnSync(exe,invocation,{cwd:work,input:codexInvocation(job,{baseBranch:project?.baseBranch}).input,encoding:'utf8',windowsHide:true,env:sanitizeEnvironment(process.env),timeout:job.timeoutSeconds*1000,maxBuffer:1024*1024});
+   // Invoke Codex's installed JS entry directly: avoid cmd.exe quoting and preserve exact TOML -c value.
+   // On Windows, only the dedicated worker-local install is accepted; no fallback to production PATH.
+   const launch=buildWorkerCodexLaunch();
+   const runner=spawnSync(launch.executable,launch.arguments,{cwd:work,input:codexInvocation(job,{baseBranch:project?.baseBranch}).input,encoding:'utf8',windowsHide:true,env:sanitizeEnvironment(process.env),timeout:job.timeoutSeconds*1000,maxBuffer:1024*1024});
    // Do not persist or upload Codex output; it could contain confidential material.
    const modified=inspectedChanges(work);
    const diffGate=classifyDiffFiles(modified);
