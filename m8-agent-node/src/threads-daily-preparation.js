@@ -34,15 +34,17 @@ export async function prepareDailyThreadsCycle({jstDate,applicationId,accessKey,
    const html=await fetchPage(page,{fetchFn:boundedFetch});
    const extracted=extractEditorialSpecQuotes(html.html);
    const verified=verifyProductPageQuotes({apiEvidence:api,pageUrl:html.url,html:html.html,quotePlans:extracted.quotePlans,checkedAt:jstDate});
-   if(verified.status!=='page_quotes_matched'){held.push({itemCode:c.itemCode,reason:'product_page_evidence_insufficient'});continue;}
+   if(verified.status!=='page_quotes_matched'){held.push({itemCode:c.itemCode,reason:'product_page_evidence_insufficient',quoteCount:extracted.quotePlans.length});continue;}
    const assembled=assembleEditorialResearch(c,api,verified.pageReview);
    if(!assembled.research){held.push({itemCode:c.itemCode,reason:'research_packet_incomplete'});continue;}
    researchByItemCode[c.itemCode]={...assembled.research,productPageUrl:page};
    const plan=planThreadsDailyCycle({jstDate,ranking,performanceRecords,researchByItemCode,history,replyCandidates,replyHistory,ownUsername});
    if(plan.status==='batch_review_required')return {...plan,researchAttemptCount:attempted,researchHeld:held};
+   held.push({itemCode:c.itemCode,reason:plan.held?.find(x=>x.itemCode===c.itemCode)?.reason||'editorial_plan_held'});
   }catch(e){
    if(rateLimited(e))return {...limited('rakuten_rate_limited'),researchAttemptCount:attempted,researchHeld:held};
-   held.push({itemCode:c.itemCode,reason:'product_research_failed'});
+   const safe=/^(?:rakuten_item_http_\d{3}|product_page_http_\d{3}|product_page_(?:too_large|not_html|charset_invalid|charset_unrecognized|binary_response_required)|unsupported_product_page_url|invalid_page_html|unexpected_item_search_shape)$/.test(String(e?.message||''))?e.message:'product_research_failed';
+   held.push({itemCode:c.itemCode,reason:safe});
   }
  }
  return {...limited('no_qualified_product'),researchAttemptCount:attempted,researchHeld:held};

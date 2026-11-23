@@ -21,7 +21,7 @@ const dayValid=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isF
 const dayTime=x=>Date.parse(x+'T00:00:00Z');
 const validPage=value=>{try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='item.rakuten.co.jp'&&!u.port&&!u.username&&!u.password&&!u.search&&!u.hash&&/^\/[a-zA-Z0-9_-]+\/[^/]+\/$/.test(u.pathname);}catch{return false;}};
 const validAffiliate=value=>{try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='hb.afl.rakuten.co.jp'&&!u.port&&!u.username&&!u.password&&!u.hash&&/^\/(?:ichiba|hgc)\//.test(u.pathname);}catch{return false;}};
-function sameTarget(link,page){try{const u=new URL(link);return u.searchParams.getAll('pc').length===1&&u.searchParams.get('pc')===page;}catch{return false;}}
+function sameTarget(link,page){try{const u=new URL(link);if(u.searchParams.getAll('pc').length!==1)return false;const target=new URL(u.searchParams.get('pc'));if(target.protocol!=='https:'||target.hostname!=='item.rakuten.co.jp'||target.port||target.username||target.password||target.search||target.hash)return false;return target.origin+target.pathname.replace(/\/$/,'')+'/'===page;}catch{return false;}}
 const verifiedPost=r=>Boolean(r?.id)&&['posted','verified_posted'].includes(r?.meta?.publishStatus);
 const sha=value=>createHash('sha256').update(JSON.stringify(value),'utf8').digest('hex');
 const keyOf=(date,itemCode)=>'cfe-daily-'+date+'-'+sha(itemCode).slice(0,12);

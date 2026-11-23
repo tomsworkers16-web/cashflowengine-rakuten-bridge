@@ -22,6 +22,9 @@ test('unverified, stale or mismatched product evidence holds all stages',()=>{
  }
 });
 test('recently featured item is not repeated on the next day',()=>{const p=planThreadsDailyCycle({...input,history:[{jstDate:'2026-11-23',meta:{itemCode:item.itemCode}}]});assert.equal(p.slots.length,0);});
+test('official pc target may omit terminal slash but query or a different item remains blocked',()=>{
+ const p=planThreadsDailyCycle({...input,researchByItemCode:{[item.itemCode]:{...research,affiliateUrl:'https://hb.afl.rakuten.co.jp/ichiba/example/?pc='+encodeURIComponent(page.slice(0,-1))}}});assert.equal(p.status,'batch_review_required');
+});
 test('identical recently confirmed guide is not repeated with a different item',()=>{
  const p=plan();const history=[{...posted(p,0),jstDate:'2026-11-23',meta:{publishStatus:'posted',itemCode:'other:1'}}];
  const next=planThreadsDailyCycle({...input,history});assert.equal(next.status,'research_required');assert.equal(next.held[0].reason,'recent_editorial_copy');
