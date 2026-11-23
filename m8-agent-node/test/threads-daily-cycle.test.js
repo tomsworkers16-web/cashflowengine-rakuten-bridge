@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {planThreadsDailyCycle,selectDailyStage,planDailyReplySuggestions,selectApprovedDailyReplies,summarizeDailyCycleOutcome} from '../src/threads-daily-cycle.js';
+import {planThreadsDailyCycle,selectDailyStage,planDailyReplySuggestions,selectApprovedDailyReplies,summarizeDailyCycleOutcome,DAILY_AUTO_POLICY} from '../src/threads-daily-cycle.js';
 import {publishTextOnce} from '../src/posting-guard.js';
 const day='2026-11-24';
 const item={itemCode:'shop:1',itemName:'収納チェスト ラック',rank:2,price:4999,hasAffiliateUrl:true};
@@ -56,4 +56,18 @@ test('external reply requires explicit selection, unchanged source and verified 
  assert.equal(selectApprovedDailyReplies({...params,approval:approval(p)}).length,0);
  assert.equal(selectApprovedDailyReplies({...params,candidates:[{...candidate,text:candidate.text+' 追記'}]}).length,0);
  assert.equal(selectApprovedDailyReplies({...params,replyHistory:[{jstDate:day,url:candidate.url,status:'unverified',author:candidate.author}]}).length,0);
+});
+const autoPlan=()=>planThreadsDailyCycle({...input,researchByItemCode:{[item.itemCode]:{...research,facts:[{...research.facts[0],evidenceQuote:'引き出し内幅26cm'},{id:'material',claim:'材質はポリプロピレンと記載',sourceUrl:page,checkedAt:day,evidenceQuote:'材質 ポリプロピレン'}]}}});
+const auto={approval:null,autoPolicy:DAILY_AUTO_POLICY,accountUsername:'rakumitsu_select'};
+test('standing own-post policy advances all three slots without daily approval',async()=>{
+ const p=autoPlan(),journal=[];let sent=0;
+ for(const s of p.slots){const a=slot(p,s.slot,{...auto,journal,officialPostCount:sent});assert.equal(a.status,'eligible_for_existing_publisher');assert.equal(a.meta.authorization,DAILY_AUTO_POLICY);await publishTextOnce({text:a.text,slot:s.slot,jstDate:day,meta:a.meta,record:r=>journal.push(r),send:async()=>String(++sent),lookup:async()=>[]});}
+ assert.equal(sent,3);assert.equal(slot(p,'19:30',{...auto,journal,officialPostCount:3}).reason,'daily_cap_reached');
+});
+test('auto policy denies unapproved account, incomplete evidence, and uncertain preceding post',()=>{
+ const p=autoPlan();assert.equal(slot(p,'07:30',{...auto,accountUsername:'another'}).reason,'approval_missing_or_changed');assert.equal(slot(plan(),'07:30',auto).reason,'auto_policy_evidence_required');assert.equal(slot(p,'19:30',{...auto,journal:[posted(p,0),posted(p,1,'uncertain')]}).reason,'previous_stage_not_verified');
+ p.policyEvidence.research.facts[0].claim='変更';assert.equal(slot(p,'07:30',auto).reason,'approval_missing_or_changed');
+});
+test('standing policy cannot authorize an external reply',()=>{
+ const p=autoPlan();assert.deepEqual(selectApprovedDailyReplies({plan:p,approval:null,autoPolicy:DAILY_AUTO_POLICY,jstDate:day,journal:[posted(p,0)]}),[]);
 });

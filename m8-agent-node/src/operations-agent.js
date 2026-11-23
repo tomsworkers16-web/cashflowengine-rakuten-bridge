@@ -13,6 +13,7 @@ import { selectPostsForInsights } from './post-insights-selection.js';
 import { summarizeRecentAffiliateEvidence } from './rolling-revenue-evidence.js';
 import { prepareDailyThreadsCycle } from './threads-daily-preparation.js';
 import { summarizeDailyCycleOutcome } from './threads-daily-cycle.js';
+import { dailyCycleEnabled } from './threads-daily-policy.js';
 import { rakutenCooldownRemaining } from './rakuten-rate-policy.js';
 
 const root = path.resolve(process.cwd());
@@ -212,7 +213,7 @@ async function buildNightReport(day = dayKey()) {
   };
 
   report.revenueDecisions = decideRevenueActions(report);
-  if(process.env.CFE_THREADS_DAILY_CYCLE_ENABLED==='true'){
+  if(dailyCycleEnabled(dataDir)){
     report.dailyCycle=summarizeDailyCycleOutcome({plan:readJson(path.join(dataDir,'threads-daily-proposal.json'),null),jstDate:day,journal:postJournal,insights:postInsights});
   }
   report.firstCommissionFunnel = diagnoseFirstCommission(report);
@@ -355,7 +356,7 @@ async function runDailyCommander() {
     reasons
   };
 
-  if(String(process.env.CFE_THREADS_DAILY_CYCLE_ENABLED||'false').toLowerCase()==='true'){
+  if(dailyCycleEnabled(dataDir)){
     strategy.settings.CFE_EXTERNAL_REPLY_MAX_PER_DAY=Math.min(3,maxReplies);
     try{strategy.dailyCycle=await prepareDailyCycleProposal(current);}
     catch{strategy.dailyCycle={status:'research_required',reason:'proposal_save_failed',published:0};}
