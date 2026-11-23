@@ -35,3 +35,18 @@ node src/run-editorial-performance-evidence-audit.js
 node --test test/editorial-performance-evidence-audit.test.js test/editorial-performance-priority.test.js
 node src/run-editorial-performance-priority.js input.json
 ```
+
+## B案記事候補への接続
+
+`buildEditorialShortlist`、`buildEditorialArticleWorkflow`、`runEditorialAiWorkflow` は任意の `performanceRecords`（監査対象のレコード配列）を受け取る。省略時は従来通り。入力を指定した場合のみ、最大候補数の切り捨て前に報告上の確定純利益を評価する。赤字候補は `performance.lossReview` に分離し、記事生成しない。2枠以上で最後の枠が利益実績候補のみになる場合、ショップ・テーマ上限に適合する未検証候補があれば1枠を確保する。
+
+実績情報は調査順を決めるだけで、仕様の事実確認・品質ゲート・公開承認を代替しない。AI生成と記事整形は同じ候補集合を使う。
+
+既存のレビュー用候補入力JSONを使い、M8の台帳を別途コピーせずオフラインで読み込める（実行場所は開発用複製。実環境の台帳は読み取り専用で明示指定する）。
+
+```powershell
+node src/run-editorial-article-workflow.js input.json --ledger .data/affiliate-results.json
+node --test test/editorial-performance-article-integration.test.js
+```
+
+入力JSON内に `performanceRecords` が既に存在する場合は、`--ledger` を併用しない。不正または未取得の台帳はエラーとし、実績ゼロ扱いにしない。本番台帳を用いた実測は未実施。

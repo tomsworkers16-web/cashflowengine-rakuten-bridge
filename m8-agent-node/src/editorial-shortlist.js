@@ -1,5 +1,6 @@
 // Evidence-limited shortlist of Rakuten ranking candidates for a reader-first media.
 // Ranking is discovery evidence, not proof of product quality, long-term demand or sales.
+import { prioritizeEditorialResearch } from './editorial-performance-priority.js';
 const THEMES=[
  ['cleaning',/換気扇|フィルター|掃除|汚れ|ブラシ|洗浄|排気口|カバー/],
  ['storage',/収納|ラック|整理|ホルダー|スタンド|置き場|水切り/],
@@ -60,20 +61,41 @@ export function evaluateRankingCandidate(candidate){
   rationale
  };
 }
-export function buildEditorialShortlist(ranking,{max=5,maxPerShop=1,maxPerTheme=2}={}){
+export function buildEditorialShortlist(ranking,{max=5,maxPerShop=1,maxPerTheme=2,performanceRecords,minClicks=5}={}){
  if(!Array.isArray(ranking))throw new Error('ranking_items_required');
  if(!Number.isInteger(max)||max<1||max>10)throw new Error('invalid_shortlist_limit');
  const all=ranking.map(evaluateRankingCandidate).filter(Boolean)
   .sort((a,b)=>b.priority-a.priority||a.rank-b.rank);
+ let ordered=all, performance;
+ if(performanceRecords!==undefined){
+  const unique=new Map();
+  for(const item of all)if(!unique.has(item.itemCode))unique.set(item.itemCode,item);
+  const assessed=prioritizeEditorialResearch({candidates:[...unique.values()],records:performanceRecords,minClicks});
+  ordered=assessed.items.filter(x=>x.researchLane!=='loss_review').map(x=>({
+   ...unique.get(x.itemCode),researchLane:x.researchLane,performanceEvidenceStatus:x.evidenceStatus
+  }));
+  performance={audit:assessed.evidenceAudit,lossReview:assessed.items.filter(x=>x.researchLane==='loss_review')
+   .map(x=>({itemCode:x.itemCode,evidenceStatus:x.evidenceStatus})),published:0};
+ }
  const shops=new Map(),themes=new Map(),selected=[];
- for(const item of all){
-  if(selected.length>=max)break;
-  if((shops.get(item.shop)||0)>=maxPerShop)continue;
-  if((themes.get(item.theme)||0)>=maxPerTheme)continue;
+ const fits=item=>(shops.get(item.shop)||0)<maxPerShop&&(themes.get(item.theme)||0)<maxPerTheme;
+ const add=item=>{
   selected.push(item);
   shops.set(item.shop,(shops.get(item.shop)||0)+1);
   themes.set(item.theme,(themes.get(item.theme)||0)+1);
+ };
+ for(const item of ordered){
+  if(selected.length>=max)break;
+  if(!fits(item))continue;
+  // Reserve the final available slot for an eligible experiment if the prior slots
+  // contained only positive evidence. Never relax diversity constraints.
+  if(performance&&max>1&&selected.length===max-1&&item.researchLane==='validated_candidate'&&
+      !selected.some(x=>x.researchLane==='experiment')){
+   const experiment=ordered.find(x=>x.researchLane==='experiment'&&fits(x));
+   if(experiment){add(experiment);break;}
+  }
+  add(item);
  }
- return {selected,scanned:ranking.length,eligible:all.length,
+ return {selected,scanned:ranking.length,eligible:all.length,...(performance?{performance}:{}),
   disclaimer:'Candidate research only; ranking and title alone do not verify performance, niche demand, historic sales or affiliate conversion'};
 }

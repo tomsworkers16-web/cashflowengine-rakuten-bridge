@@ -7,9 +7,9 @@ import { draftArticleWithModel } from './editorial-llm-adapter.js';
 
 export async function runEditorialAiWorkflow({
   ranking, researchByItemCode={},apiEvidenceByItemCode={},
-  productPageReviewsByItemCode={},generateFn,max=5
+  productPageReviewsByItemCode={},generateFn,max=5,performanceRecords,minClicks=5
 }={}) {
-  const shortlist=buildEditorialShortlist(ranking,{max});
+  const shortlist=buildEditorialShortlist(ranking,{max,performanceRecords,minClicks});
   const draftsByItemCode={};
   const research={};
   const generation=[];
@@ -40,6 +40,7 @@ export async function runEditorialAiWorkflow({
     ranking,
     draftsByItemCode,
     max,
+    performanceRecords,minClicks,
     autoRevise:false
   });
   const allowed=new Set(Object.keys(draftsByItemCode));

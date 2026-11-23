@@ -36,9 +36,9 @@ function articleBody(draft) {
  * Ranking/title-only evidence never becomes verifiedFacts.
  */
 export function buildEditorialArticleWorkflow({
-  ranking, draftsByItemCode = {}, researchByItemCode = {}, apiEvidenceByItemCode = {}, productPageReviewsByItemCode = {}, max = 5, autoRevise = true
+  ranking, draftsByItemCode = {}, researchByItemCode = {}, apiEvidenceByItemCode = {}, productPageReviewsByItemCode = {}, max = 5, autoRevise = true, performanceRecords, minClicks = 5
 } = {}) {
-  const shortlist = buildEditorialShortlist(ranking, { max });
+  const shortlist = buildEditorialShortlist(ranking, { max, performanceRecords, minClicks });
   const entries = shortlist.selected.map(candidate => {
     const suppliedResearch = researchByItemCode[candidate.itemCode];
     const assembled = !suppliedResearch && apiEvidenceByItemCode[candidate.itemCode]
@@ -97,6 +97,7 @@ export function buildEditorialArticleWorkflow({
     mode: 'offline_review_only',
     scanned: shortlist.scanned,
     eligible: shortlist.eligible,
+    ...(shortlist.performance ? { performance: shortlist.performance } : {}),
     entries,
     summary: {
       researchRequired: entries.filter(x => x.status === 'research_required').length,
