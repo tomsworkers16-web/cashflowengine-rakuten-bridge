@@ -65,3 +65,24 @@ node --test test/rakuten-order-report-audit.test.js
 ```
 
 監査は実ファイルで `empty_order_report` と判定。非空の注文行は模擬入力で形状のみ検査済み。実データによる金額・ステータス・計測IDの意味検証を完了するまで、既存の利益台帳と混ぜない。公式参照: https://affiliate.rakuten.co.jp/guides/report/ および https://affiliate.rakuten.co.jp/guides/link/ 。
+
+## 計測IDと記事・投稿の照合（2026-11-24）
+
+楽天の公式リンク作成画面で付与した計測IDを、投稿・記事の内部IDと一対一で記録する。実際の発行と公開の確認は別工程であり、IDの文字列から公式リンクの発行を推定しない。次は公式発行済みリンクを1件だけ登録し、レポートに反映された計測IDを確認する。
+
+入力の例（架空値、発行・公開は未確認）:
+
+```json
+[
+  {"measurementId":"example-id","channel":"threads","contentId":"draft-001","officialLinkConfirmed":false,"publicationConfirmed":false}
+]
+```
+
+`officialLinkConfirmed` と `publicationConfirmed` は確認記録がある場合に限り真とする。同一IDが重複登録されている場合は照合しない。照合結果はレポート行数と内部記事IDのみ。計測IDそのもの、購入商品名、金額、秘密情報は出力しない。商品・投稿の因果関係、購入商品の同一性、注文件数、クリック、実利益は判定しない。安定した注文IDもないため複数の月次スナップショットを合算しない。
+
+```powershell
+node src/run-rakuten-measurement-attribution.js order.csv registry.json
+node --test test/rakuten-measurement-attribution.test.js
+```
+
+現段階はオフライン照合の試作。公式リンク発行・本番投稿・既存リンク変更・M8配布は未実施。本物の非空注文行による検証も未実施。
