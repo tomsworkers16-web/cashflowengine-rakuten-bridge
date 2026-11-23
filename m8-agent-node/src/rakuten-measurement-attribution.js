@@ -20,18 +20,21 @@ export function auditMeasurementAttribution(csv, registry) {
   for(const entry of registry){
     const key=id(entry?.measurementId);
     if(!key||key==='-'||key==='－'){invalidRegistryRows++;continue;}
-    const valid=Boolean(contentId(entry.contentId)&&['threads','note'].includes(entry.channel));
+    const scope=entry.scope??'content';
+    const target=scope==='content'?entry.contentId:scope==='cohort'?entry.cohortId:null;
+    const valid=Boolean(contentId(target)&&['threads','note'].includes(entry.channel));
     if(!valid)invalidRegistryRows++;
     const group=groups.get(key)||[];
-    group.push({valid,contentId:valid?entry.contentId:null,channel:valid?entry.channel:null,
-      confirmed:valid&&entry.officialLinkConfirmed===true&&entry.publicationConfirmed===true});
+    group.push({valid,scope,target:valid?target:null,channel:valid?entry.channel:null,
+      confirmed:valid&&entry.officialLinkConfirmed===true&&entry.publicationConfirmed===true&&entry.reportIdVerified===true});
     groups.set(key,group);
   }
+  if(groups.size>20)return {...base,status:'registry_invalid',reason:'official_id_capacity_exceeded'};
   const rows=parseCsv(csv.replace(/^\uFEFF/,''));
   const start=rows.findIndex((row,i)=>same(row,JA)&&same(rows[i+1],EN));
   const body=rows.slice(start+2);
   const counts={matchedRows:0,unknownIdRows:0,missingIdRows:0,ambiguousIdRows:0,unconfirmedRegistryRows:0};
-  const byContent=new Map();
+  const byContent=new Map(),byCohort=new Map();
   for(const row of body){
     const key=id(row[10]);
     if(!key||key==='-'||key==='－'){counts.missingIdRows++;continue;}
@@ -41,13 +44,15 @@ export function auditMeasurementAttribution(csv, registry) {
     const entry=group[0];
     if(!entry.confirmed){counts.unconfirmedRegistryRows++;continue;}
     counts.matchedRows++;
-    const index=JSON.stringify([entry.channel,entry.contentId]);
-    const current=byContent.get(index)||{channel:entry.channel,contentId:entry.contentId,matchingReportRows:0};
+    const index=JSON.stringify([entry.channel,entry.target]);
+    const bucket=entry.scope==='cohort'?byCohort:byContent;
+    const field=entry.scope==='cohort'?'cohortId':'contentId';
+    const current=bucket.get(index)||{channel:entry.channel,[field]:entry.target,matchingReportRows:0};
     current.matchingReportRows++;
-    byContent.set(index,current);
+    bucket.set(index,current);
   }
   return {...base,status:body.length?'report_rows_assessed':'no_report_rows',
     registry:{entries:registry.length,invalidRegistryRows,ambiguousIds:[...groups.values()].filter(g=>g.length!==1).length},
-    ...counts,contentMatches:[...byContent.values()],
-    caveat:'Exact ID match against a locally asserted registry only; reports may contain repeated or unrelated purchases. Do not sum across snapshots, infer clicks or realized profit, or treat row counts as orders.'};
+    ...counts,contentMatches:[...byContent.values()],cohortMatches:[...byCohort.values()],
+    caveat:'Exact report ID match against a locally asserted registry only; cohort matches never identify individual posts; reports may contain repeated or unrelated purchases. Do not sum across snapshots, infer clicks or realized profit, or treat row counts as orders.'};
 }

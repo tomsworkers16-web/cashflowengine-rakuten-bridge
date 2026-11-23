@@ -68,17 +68,17 @@ node --test test/rakuten-order-report-audit.test.js
 
 ## 計測IDと記事・投稿の照合（2026-11-24）
 
-楽天の公式リンク作成画面で付与した計測IDを、投稿・記事の内部IDと一対一で記録する。実際の発行と公開の確認は別工程であり、IDの文字列から公式リンクの発行を推定しない。次は公式発行済みリンクを1件だけ登録し、レポートに反映された計測IDを確認する。
+楽天の公式リンク作成画面で付与した計測IDを、投稿・記事の内部ID、または媒体・記事タイプのグループIDと対応付ける。実際の発行と公開の確認は別工程であり、IDの文字列から公式リンクの発行を推定しない。次は公式発行済みリンクを1件だけ登録し、レポートに反映された計測IDを確認する。
 
 入力の例（架空値、発行・公開は未確認）:
 
 ```json
 [
-  {"measurementId":"example-id","channel":"threads","contentId":"draft-001","officialLinkConfirmed":false,"publicationConfirmed":false}
+  {"measurementId":"example-id","channel":"threads","contentId":"draft-001","officialLinkConfirmed":false,"publicationConfirmed":false,"reportIdVerified":false}
 ]
 ```
 
-`officialLinkConfirmed` と `publicationConfirmed` は確認記録がある場合に限り真とする。同一IDが重複登録されている場合は照合しない。照合結果はレポート行数と内部記事IDのみ。計測IDそのもの、購入商品名、金額、秘密情報は出力しない。商品・投稿の因果関係、購入商品の同一性、注文件数、クリック、実利益は判定しない。安定した注文IDもないため複数の月次スナップショットを合算しない。
+`officialLinkConfirmed` と `publicationConfirmed` は確認記録がある場合に限り真とする。`reportIdVerified` は実注文CSVの表記が確認できたときだけ真とする。同一IDが重複登録されている場合は照合しない。照合結果はレポート行数と内部記事IDのみ。計測IDそのもの、購入商品名、金額、秘密情報は出力しない。商品・投稿の因果関係、購入商品の同一性、注文件数、クリック、実利益は判定しない。安定した注文IDもないため複数の月次スナップショットを合算しない。
 
 ```powershell
 node src/run-rakuten-measurement-attribution.js order.csv registry.json
@@ -92,3 +92,11 @@ node --test test/rakuten-measurement-attribution.test.js
 楽天公式の説明（https://note.com/rakutenaffiliate/n/n3cf77e5d3fee 、https://affiliate.rakuten.co.jp/guides/link/ ）によれば、計測IDは管理画面 https://affiliate.rakuten.co.jp/user/sites で作成し、公式リンク作成時に選択する。短縮URLでは計測IDを選択できないため、計測対象は「リンクのみ」の公式発行URLとする。公式の公開資料で計測IDの直接発行APIを確認できていない。既存APIのアフィリエイトIDと計測IDを混同せず、未文書化のURL書き換えを行わない。
 
 初回は半角英数字の試験ID `rkt001` を1件のみ公式UIで登録する案。既存IDと重複しないことを確認し、登録可能数・文字数に制約が表示される場合は記録する。商品選定後に公式リンクを発行し、レビュー済みの投稿/記事に対応付ける。発行前・公開前はそれぞれ確認フラグを真にしない。実際の登録、リンク作成、公開、成果反映は現段階で未実施。既存の投稿リンクは維持する。
+
+## 計測ID上限と公式生成の実機確認（2026-11-24）
+
+オーナーの画面で、計測IDの登録上限20個・削除済みIDがレポート非表示になることを確認。試験ID `rkt001` の登録と、公式の「リンクのみ」でIDが選択され、リンク内に楽天発行の内部コードが含まれることまで確認済み。URL・アフィリエイト識別子・内部コードの実値は保存しない。表示名とCSVの計測ID列の値が同じかは未確認。公式画面もソース内のIDを書き換えないよう案内している。
+
+従来の投稿ごとの無制限なID発行案は撤回。試験1件は個別計測に使い、通常運用は長期的なグループ単位（例: Threads 比較ガイド、note 購入前チェック）を優先する。20枠を使い切らない。削除や再利用は自動化しない。グループ計測から個別投稿の成果を推定しない。
+
+新しいレジストリには `scope:"cohort"`、`cohortId` を指定可能。既存の個別計測は `scope:"content"`（既定）と `contentId`。同じIDで両方を登録しない。照合は `reportIdVerified:true` を追加必須とし、レポート実物の値が確認されるまで保留する。計測ID付きURLは生成確認済みだが、まだ公開していないため、成果照合・購入・収益は未検証。

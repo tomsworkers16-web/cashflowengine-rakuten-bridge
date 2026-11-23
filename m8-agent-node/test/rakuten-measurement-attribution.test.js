@@ -4,7 +4,7 @@ import {auditMeasurementAttribution as audit} from '../src/rakuten-measurement-a
 const header='発生日,成果報酬,料率,売上金額,ジャンル名,ショップ名,商品名,ステータス,リンクタイプ,デバイスタイプ,計測ID\ndate,rewards,rate,amount,genre_name,shop_name,item_name,status,link_type,device_type,measurement_id';
 const csv='\uFEFF"注文別成果: 2026.11"\n\n'+header+'\n';
 const row=(key)=>'2026-11-01,100,3,3000,genre,shop,other-product,1,1,3,'+key+'\n';
-const binding=(changes={})=>({measurementId:'sample-id',channel:'threads',contentId:'post-1',officialLinkConfirmed:true,publicationConfirmed:true,...changes});
+const binding=(changes={})=>({measurementId:'sample-id',channel:'threads',contentId:'post-1',officialLinkConfirmed:true,publicationConfirmed:true,reportIdVerified:true,...changes});
 test('empty export does not establish zero earnings or attribution',()=>{const r=audit(csv,[binding()]);assert.equal(r.status,'no_report_rows');assert.equal(r.attributionVerified,false);assert.equal(r.matchedRows,0);});
 test('exact confirmed binding produces a candidate row association only',()=>{const r=audit(csv+row('sample-id'),[binding()]);assert.equal(r.matchedRows,1);assert.equal(r.contentMatches[0].contentId,'post-1');assert.equal(r.itemProfitEligible,false);assert.ok(!JSON.stringify(r).includes('sample-id'));assert.equal(r.published,0);});
 test('shared or duplicate ID is ambiguous',()=>{const r=audit(csv+row('sample-id'),[binding(),binding({contentId:'post-2'})]);assert.equal(r.ambiguousIdRows,1);assert.equal(r.matchedRows,0);});
@@ -12,3 +12,7 @@ test('unconfirmed link or publication never matches',()=>{const r=audit(csv+row(
 test('unknown or blank IDs remain unknown',()=>{const r=audit(csv+row('other')+row(''),[binding()]);assert.equal(r.unknownIdRows,1);assert.equal(r.missingIdRows,1);});
 test('invalid layout and registry fail closed',()=>{assert.equal(audit('invalid',[binding()]).status,'report_unverified');assert.equal(audit(csv,{}).status,'registry_invalid');});
 test('duplicate report rows are row matches rather than verified orders',()=>{const r=audit(csv+row('sample-id')+row('sample-id'),[binding()]);assert.equal(r.matchedRows,2);assert.equal(r.attributionVerified,false);assert.equal(r.itemProfitEligible,false);});
+test('cohort association never claims an individual post',()=>{const r=audit(csv+row('sample-id'),[binding({scope:'cohort',cohortId:'threads-guide'})]);assert.equal(r.contentMatches.length,0);assert.equal(r.cohortMatches[0].cohortId,'threads-guide');assert.equal(r.cohortMatches[0].matchingReportRows,1);});
+test('an issued link does not establish actual report ID format',()=>{const r=audit(csv+row('sample-id'),[binding({reportIdVerified:false})]);assert.equal(r.unconfirmedRegistryRows,1);assert.equal(r.matchedRows,0);});
+test('more than twenty distinct IDs are not an operational registry',()=>{const r=audit(csv,Array.from({length:21},(_,i)=>binding({measurementId:'id'+i})));assert.equal(r.status,'registry_invalid');assert.equal(r.reason,'official_id_capacity_exceeded');});
+test('cohort and individual binding with same ID never double-attribute',()=>{const r=audit(csv+row('sample-id'),[binding(),binding({scope:'cohort',cohortId:'guide'})]);assert.equal(r.ambiguousIdRows,1);assert.equal(r.contentMatches.length,0);assert.equal(r.cohortMatches.length,0);});
