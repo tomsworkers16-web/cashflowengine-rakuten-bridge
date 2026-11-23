@@ -3,7 +3,7 @@
 // No publishing, no persistent state, and no model/API-key exposure in output.
 import { makeItemDetailRequest } from './rakuten-candidate-evidence.js';
 
-const apiSource='https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
+export const apiSource='https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 const isHttps = value => typeof value==='string' && /^https:\/\/[^\s]+$/i.test(value);
 const positive = value => typeof value==='number' && Number.isFinite(value) && value>0;
 const today = () => new Date().toISOString().slice(0,10);
@@ -34,7 +34,7 @@ export function rakutenEditorialEvidence(payload, itemCode, {checkedAt=today()}=
   return {
     itemCode,status:'needs_product_detail_research',
     source:'rakuten_official_item_search',checkedAt,
-    facts,productPageUrl:itemUrl,affiliateUrl,
+    facts,productPageUrl:itemUrl,affiliateUrl,itemCaption:typeof item.itemCaption==='string'?item.itemCaption.slice(0,10000):'',
     missing,needsProductPageReview:true,
     research:null,
     disclaimer:'API-listed price/name/review counts are verified as response fields only. They do not verify product dimensions, performance, suitability or the page itself.'
@@ -63,13 +63,14 @@ export async function fetchRakutenEditorialEvidence(itemCode,{
 export function canonicalRakutenItemUrl(input) {
   try {
     const url = new URL(input);
-    if (url.protocol !== 'https:') return null;
-    if (url.hostname === 'item.rakuten.co.jp') return url.origin + url.pathname.replace(/\/$/, '') + '/';
+    if (url.protocol !== 'https:'||url.username||url.password||url.port) return null;
+    if (url.hostname === 'item.rakuten.co.jp'&&/^\/[\w-]+\/[\w-]+\/?$/.test(url.pathname)) return url.origin + url.pathname.replace(/\/$/, '') + '/';
     if (url.hostname !== 'hb.afl.rakuten.co.jp') return null;
+    if(url.searchParams.getAll('pc').length!==1)return null;
     const target = url.searchParams.get('pc');
     if (!target) return null;
     const page = new URL(target);
-    if (page.protocol !== 'https:' || page.hostname !== 'item.rakuten.co.jp') return null;
+    if (page.protocol !== 'https:' || page.hostname !== 'item.rakuten.co.jp'||page.username||page.password||page.port||page.search||page.hash||!/^\/[\w-]+\/[\w-]+\/?$/.test(page.pathname)) return null;
     return page.origin + page.pathname.replace(/\/$/, '') + '/';
   } catch { return null; }
 }

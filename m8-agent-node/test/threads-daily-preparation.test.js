@@ -22,3 +22,9 @@ test('a labelled product description other than slim/wide storage provides liter
 test('ambiguous or absent page evidence remains blocked and emits safe reason',async()=>{
  const p=await prepareDailyThreadsCycle({...input,fetchPage:async()=>({url:page,html:'<html>商品仕様 本体サイズ 30×40×50cm 本体サイズ 80×90×90cm 関連商品 本体重量 約2kg 商品レビュー</html>'})});assert.equal(p.status,'research_required');assert.equal(p.researchHeld[0].reason,'product_page_evidence_insufficient');assert.equal(p.researchHeld[0].quoteCount,0);
 });
+test('official same-shop affiliate target supplies missing item URL and literal caption supplies two facts',async()=>{
+ const p=await prepareDailyThreadsCycle({...input,fetchEvidence:async()=>({...await input.fetchEvidence(),productPageUrl:null,itemCaption:'商品仕様 本体サイズ 30×40×50cm 本体重量 約2kg 素材 ステンレス'}),fetchPage:async()=>({url:page,html:'<html>商品仕様は画像にあります。詳細は商品説明を参照してください。</html>'})});assert.equal(p.status,'batch_review_required');assert.match(p.slots[1].text,/楽天の商品説明/);
+});
+test('official genre names scope discovery without more detail attempts',async()=>{
+ const calls=[];const p=await prepareDailyThreadsCycle({...input,discover:async o=>{calls.push(o.genreId);return {editorialShortlist:{selected:[item]},results:{genre:{children:[{genreId:123,name:'インテリア・寝具・収納'}]}}};}});assert.deepEqual(calls,[undefined,123]);assert.equal(p.researchAttemptCount,1);
+});

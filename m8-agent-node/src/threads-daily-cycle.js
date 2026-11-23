@@ -6,6 +6,7 @@ import { draftFromResearch } from './editorial-research-drafter.js';
 import { evaluateEditorialDraft } from './editorial-quality-gate.js';
 import { cleanProductName, validatePublicationText } from './product-posting.js';
 import { scoreCandidate, buildReply, looksCorruptedJapanese } from './external-reply-engine.js';
+import { apiSource } from './editorial-rakuten-evidence.js';
 export const DAILY_SLOTS=Object.freeze(['07:30','12:30','19:30']);
 const roles=['column','comparison','revenue'];
 const THEMES={
@@ -26,7 +27,7 @@ const verifiedPost=r=>Boolean(r?.id)&&['posted','verified_posted'].includes(r?.m
 const sha=value=>createHash('sha256').update(JSON.stringify(value),'utf8').digest('hex');
 const keyOf=(date,itemCode)=>'cfe-daily-'+date+'-'+sha(itemCode).slice(0,12);
 const planDigest=plan=>sha([plan.jstDate,plan.campaignId,plan.itemCode,plan.theme,plan.slots.map(x=>[x.slot,x.role,x.text,x.affiliateUrl??null]),(plan.replySuggestions??[]).map(x=>[x.url,x.author,x.replyDraft,x.sourceDigest])]);
-function freshFact(f, page, date){return f?.sourceUrl===page&&dayValid(f.checkedAt)&&dayTime(f.checkedAt)<=dayTime(date)&&dayTime(date)-dayTime(f.checkedAt)<=7*86400000&&str(f.claim)&&!/(?:https?:\/\/|【PR】)/i.test(f.claim);}
+function freshFact(f, page, date){return (f?.sourceUrl===page||(f?.sourceUrl===apiSource&&f?.sourceKind==='official_item_caption'&&str(f.evidenceQuote)&&f.claim==='楽天の商品説明：'+f.evidenceQuote+'と記載'))&&dayValid(f.checkedAt)&&dayTime(f.checkedAt)<=dayTime(date)&&dayTime(date)-dayTime(f.checkedAt)<=7*86400000&&str(f.claim)&&!/(?:https?:\/\/|【PR】)/i.test(f.claim);}
 function recentItems(history,date){const cutoff=dayTime(date)-7*86400000;return new Set(history.filter(r=>dayValid(r?.jstDate)&&dayTime(r.jstDate)>=cutoff&&dayTime(r.jstDate)<=dayTime(date)).map(r=>r.meta?.itemCode).filter(Boolean));}
 
 function compose(candidate, research, date){
@@ -43,7 +44,7 @@ function compose(candidate, research, date){
  // Use the actual evidence-backed editorial draft, including supported variant
  // comparisons, rather than discarding it in favour of a generic checklist.
  const checks=generated.draft.purchaseChecks.map((v,i)=>(i+1)+'．'+v.howToCheck);
- const detailed=guide.title+'：確認したい3つのこと\n\n'+checks.join('\n')+'\n\n販売ページの例：'+str(facts[0].claim)+'。';
+ const detailed=guide.title+'：確認したい3つのこと\n\n'+checks.join('\n')+'\n\n'+(facts[0].sourceKind==='official_item_caption'?'商品説明の例：':'販売ページの例：')+str(facts[0].claim)+'。';
  const comparison=validatePublicationText(detailed)?guide.title+'：確認したい3つのこと\n\n'+checks.join('\n'):detailed;
  const name=cleanProductName(candidate.itemName,35),url=research.affiliateUrl;
  let revenue=null;
