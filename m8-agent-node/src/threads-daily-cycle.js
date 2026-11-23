@@ -8,6 +8,7 @@ import { cleanProductName, validatePublicationText } from './product-posting.js'
 import { scoreCandidate, buildReply, looksCorruptedJapanese } from './external-reply-engine.js';
 import { apiSource } from './editorial-rakuten-evidence.js';
 export const DAILY_SLOTS=Object.freeze(['07:30','12:30','19:30']);
+export const DAILY_AUTO_POLICY='owner-approved-own-posts-v1';
 const roles=['column','comparison','revenue'];
 const THEMES={
  storage:{title:'収納を増やす前に',column:'収納が足りないと思ったら、まず出し入れの動きを見直したい。よく使う物を取り出すために、別の物を動かしていませんか？置き場所だけでなく、使う人が毎回無理なく戻せる位置かを確認すると、買い足すべき物も見えやすくなります。',checks:['設置面積に加えて開閉に必要な空間を測る。','入れたい物の最大寸法と内寸を比べる。','収納物の重さと耐荷重を照合する。'],words:/収納|片付|整理|棚|ラック|引き出し/u},
@@ -26,7 +27,7 @@ function sameTarget(link,page){try{const u=new URL(link);if(u.searchParams.getAl
 const verifiedPost=r=>Boolean(r?.id)&&['posted','verified_posted'].includes(r?.meta?.publishStatus);
 const sha=value=>createHash('sha256').update(JSON.stringify(value),'utf8').digest('hex');
 const keyOf=(date,itemCode)=>'cfe-daily-'+date+'-'+sha(itemCode).slice(0,12);
-const planDigest=plan=>sha([plan.jstDate,plan.campaignId,plan.itemCode,plan.theme,plan.slots.map(x=>[x.slot,x.role,x.text,x.affiliateUrl??null]),(plan.replySuggestions??[]).map(x=>[x.url,x.author,x.replyDraft,x.sourceDigest])]);
+const planDigest=plan=>sha([plan.jstDate,plan.campaignId,plan.itemCode,plan.theme,plan.slots.map(x=>[x.slot,x.role,x.text,x.affiliateUrl??null]),(plan.replySuggestions??[]).map(x=>[x.url,x.author,x.replyDraft,x.sourceDigest]),plan.policyEvidence??null]);
 function freshFact(f, page, date){return (f?.sourceUrl===page||(f?.sourceUrl===apiSource&&f?.sourceKind==='official_item_caption'&&str(f.evidenceQuote)&&f.claim==='楽天の商品説明：'+f.evidenceQuote+'と記載'))&&dayValid(f.checkedAt)&&dayTime(f.checkedAt)<=dayTime(date)&&dayTime(date)-dayTime(f.checkedAt)<=7*86400000&&str(f.claim)&&!/(?:https?:\/\/|【PR】)/i.test(f.claim);}
 function recentItems(history,date){const cutoff=dayTime(date)-7*86400000;return new Set(history.filter(r=>dayValid(r?.jstDate)&&dayTime(r.jstDate)>=cutoff&&dayTime(r.jstDate)<=dayTime(date)).map(r=>r.meta?.itemCode).filter(Boolean));}
 
@@ -92,7 +93,9 @@ export function planThreadsDailyCycle({jstDate,ranking, researchByItemCode={},pe
   const attempt=compose(candidate,researchByItemCode[candidate.itemCode],jstDate);
   if(!attempt.slots){held.push({itemCode:candidate.itemCode,reason:attempt.reason});continue;}
   if(attempt.slots.slice(0,2).some(s=>recentGuide.has(s.text))){held.push({itemCode:candidate.itemCode,reason:'recent_editorial_copy'});continue;}
+  const research=researchByItemCode[candidate.itemCode];
   const plan={version:'threads-daily-cycle-v1',mode:'review_only',jstDate,campaignId:keyOf(jstDate,candidate.itemCode),itemCode:candidate.itemCode,theme:candidate.theme,slots:attempt.slots,gateScore:attempt.gateScore,publishApproved:false,published:0,
+   policyEvidence:{candidate:{itemCode:candidate.itemCode,itemName:candidate.itemName,theme:candidate.theme},research:{itemCode:research.itemCode,productPageUrl:research.productPageUrl,affiliateUrl:research.affiliateUrl,rights:research.rights,facts:research.facts}},
    replySuggestions:planDailyReplySuggestions({candidates:replyCandidates,history:replyHistory,ownUsername,theme:candidate.theme,date:jstDate})};
   return {...plan,digest:planDigest(plan),status:'batch_review_required',held,performance:shortlist.performance??null};
  }
@@ -101,12 +104,20 @@ export function planThreadsDailyCycle({jstDate,ranking, researchByItemCode={},pe
 
 // This gate is deliberately separate from the actual publisher. A matching owner
 // approval record is required for the immutable text of the whole batch.
-export function selectDailyStage({plan,approval,jstDate,slot,journal=[],officialPostCount}={}){
+export function selectDailyStage({plan,approval,autoPolicy,accountUsername,jstDate,slot,journal=[],officialPostCount}={}){
  const hold=reason=>({status:'hold',reason,published:0});
  if(!dayValid(jstDate)||!Array.isArray(journal)||!Number.isSafeInteger(officialPostCount)||officialPostCount<0)return hold('missing_runtime_evidence');
  if(!plan||plan.jstDate!==jstDate||plan.status!=='batch_review_required'||!Array.isArray(plan.slots)||plan.slots.length!==3||!str(plan.itemCode)||plan.campaignId!==keyOf(jstDate,plan.itemCode))return hold('missing_or_stale_plan');
  if(plan.slots.some((x,i)=>!x||x.slot!==DAILY_SLOTS[i]||x.role!==roles[i]||validatePublicationText(x.text,{revenue:i===2,affiliateUrl:x.affiliateUrl})||(i<2&&(/https?:\/\/|【PR】/i.test(x.text)||x.affiliateUrl))||(i===2&&!validAffiliate(x.affiliateUrl))))return hold('invalid_stage_payload');
- if(!Array.isArray(plan.replySuggestions)||plan.replySuggestions.length>3||plan.replySuggestions.some(x=>!x)||plan.digest!==planDigest(plan)||approval?.approvedByOwner!==true||approval?.digest!==plan.digest||approval?.campaignId!==plan.campaignId||approval?.jstDate!==jstDate)return hold('approval_missing_or_changed');
+ if(!Array.isArray(plan.replySuggestions)||plan.replySuggestions.length>3||plan.replySuggestions.some(x=>!x)||plan.digest!==planDigest(plan))return hold('approval_missing_or_changed');
+ const manual=approval?.approvedByOwner===true&&approval?.digest===plan.digest&&approval?.campaignId===plan.campaignId&&approval?.jstDate===jstDate;
+ if(!manual){
+  if(autoPolicy!==DAILY_AUTO_POLICY||accountUsername!=='rakumitsu_select')return hold('approval_missing_or_changed');
+  const evidence=plan.policyEvidence,c=evidence?.candidate,r=evidence?.research;
+  if(!c||!r||c.itemCode!==plan.itemCode||c.theme!==plan.theme||r.itemCode!==plan.itemCode||!Array.isArray(r.facts)||r.facts.length<2||r.facts.length>12||new Set(r.facts.map(f=>f.id)).size!==r.facts.length||r.facts.some(f=>!freshFact(f,r.productPageUrl,jstDate)||f.checkedAt!==jstDate||!str(f.evidenceQuote)||f.evidenceQuote.length>300)||!validPage(r.productPageUrl)||new URL(r.productPageUrl).pathname.split('/')[1]!==plan.itemCode.split(':')[0])return hold('auto_policy_evidence_required');
+  const regenerated=compose(c,r,jstDate);
+  if(regenerated.gateScore!==12||JSON.stringify(regenerated.slots)!==JSON.stringify(plan.slots))return hold('auto_policy_quality_hold');
+ }
  const index=DAILY_SLOTS.indexOf(slot);if(index<0)return hold('slot_invalid');
  const today=journal.filter(x=>x?.jstDate===jstDate);
  if(officialPostCount>=3||new Set(today.map(x=>x.slot)).size>=3)return hold('daily_cap_reached');
@@ -117,7 +128,7 @@ export function selectDailyStage({plan,approval,jstDate,slot,journal=[],official
   if(!verifiedPost(last)||last.meta?.campaignId!==plan.campaignId||last.meta?.dailyStage!==roles[i]||last.text!==plan.slots[i].text)return hold('previous_stage_not_verified');
  }
  const next=plan.slots[index];
- return {status:'eligible_for_existing_publisher',text:next.text,affiliateUrl:next.affiliateUrl,meta:{campaignId:plan.campaignId,dailyStage:next.role,itemCode:plan.itemCode,role:next.role==='revenue'?'revenue':'guide',affiliate:next.role==='revenue'},published:0};
+ return {status:'eligible_for_existing_publisher',text:next.text,affiliateUrl:next.affiliateUrl,meta:{campaignId:plan.campaignId,dailyStage:next.role,itemCode:plan.itemCode,role:next.role==='revenue'?'revenue':'guide',affiliate:next.role==='revenue',authorization:manual?'exact_batch_review':DAILY_AUTO_POLICY},published:0};
 }
 
 // Only exact, separately selected reply drafts from the same approved batch.
