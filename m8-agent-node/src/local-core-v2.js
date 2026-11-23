@@ -13,6 +13,7 @@ import { keywordRelevanceBonus } from './product-relevance.js';
 import { EDITORIAL_POLICY_VERSION, editorialGuide, researchLane, researchSort, researchScore } from './editorial-strategy.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
 import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
+import { DAILY_SLOTS, selectDailyStage, selectApprovedDailyReplies } from './threads-daily-cycle.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -26,6 +27,7 @@ const RAKUTEN_ACCESS_KEY = env.RAKUTEN_ACCESS_KEY || '';
 const RAKUTEN_AFFILIATE_ID = env.RAKUTEN_AFFILIATE_ID || '';
 const RAKUTEN_API_BASE = env.RAKUTEN_API_BASE || 'https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701';
 const AUTO_POST_ENABLED = String(env.CFE_AUTO_POST_ENABLED || 'false').toLowerCase() === 'true';
+const DAILY_CYCLE_ENABLED = String(env.CFE_THREADS_DAILY_CYCLE_ENABLED || 'false').toLowerCase() === 'true';
 const IMAGE_CARD_ENABLED = String(env.CFE_IMAGE_CARD_ENABLED || 'true').toLowerCase() === 'true';
 const IMAGE_POST_ENABLED = String(env.CFE_IMAGE_POST_ENABLED || 'false').toLowerCase() === 'true';
 let imageBrowserContext = null;
@@ -100,6 +102,11 @@ function readJsonl(file) {
   return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).map(x => { try { return JSON.parse(x); } catch { return null; } }).filter(Boolean);
 }
 function todayLocalPosts() { return readJsonl(postsFile).filter(x => String(x.jstDate || '') === dayKey()); }
+
+function readDailyCycleDocuments(){
+ const read=name=>{try{const file=path.join(DATA_DIR,name);if(fs.statSync(file).size>256*1024)return null;return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}};
+ return {plan:read('threads-daily-proposal.json'),approval:read('threads-daily-approval.json')};
+}
 
 async function fetchJson(url, { method = 'GET', attempts = 3, timeoutMs = 12000 } = {}) {
   let last;
@@ -200,6 +207,22 @@ async function postFor(slot, { catchup = false } = {}) {
   const official = await threadsToday();
   if (official.length >= MAX_POSTS) { state.lastDecision = 'daily_cap_reached'; return; }
   if (todayLocalPosts().some(p => p.slot === slot)) { state.lastDecision = 'slot_already_posted'; return; }
+  // Explicit opt-in only. Never fall back to unrelated advertising when a
+  // daily plan is missing, stale, unapproved or its preceding stage is uncertain.
+  if(DAILY_CYCLE_ENABLED){
+    if(catchup||SLOTS.join(',')!==DAILY_SLOTS.join(',')){state.lastDecision='daily_cycle_slot_policy_hold';saveState();return;}
+    const action=selectDailyStage({...readDailyCycleDocuments(),jstDate:dayKey(),slot,journal:todayLocalPosts(),officialPostCount:official.length});
+    if(action.status!=='eligible_for_existing_publisher'){state.lastDecision='daily_cycle_'+action.reason;saveState();return;}
+    if(official.some(p=>String(p.text||'').trim()===action.text.trim())){state.lastDecision='duplicate_official_text';saveState();return;}
+    const attempt=await publishTextOnce({text:action.text,slot,jstDate:dayKey(),meta:action.meta,
+      record:row=>append(postsFile,row),send:publishThreads,lookup:threadsToday});
+    if(attempt.status==='uncertain'){
+      state.lastDecision='daily_cycle_text_post_uncertain';state.lastError='publish_outcome_unknown';saveState();
+      event('DAILY_CYCLE_POST_UNCERTAIN',{slot,stage:action.meta.dailyStage});return;
+    }
+    Object.assign(state,{lastPostAt:new Date().toISOString(),lastPostId:attempt.id,lastDecision:'posted',lastError:null});
+    saveState();event('POSTED',{id:attempt.id,slot,role:action.meta.role,itemCode:action.meta.itemCode,dailyStage:action.meta.dailyStage});return;
+  }
   const role = catchup ? 'guide' : roleForSlot(slot, SLOTS, nowJst().getUTCDate());
   const lane = role === 'revenue' ? researchLane(dayKey()) : 'popular_proxy';
   // Rakuten rate limits must not block reader-first posts that need no Rakuten API.
@@ -476,7 +499,7 @@ async function browserLoop() {
   try {
     let ownUsername = state.threadsUsername || '';
     try { ownUsername = (await threadsHealth()).username || ownUsername; } catch {}
-    const replyEngine = makeExternalReplyEngine({ dataDir: DATA_DIR, ownUsername, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, enabled: EXTERNAL_REPLY_ENABLED, event });
+    const replyEngine = makeExternalReplyEngine({ dataDir: DATA_DIR, ownUsername, maxPerDay: DAILY_CYCLE_ENABLED?Math.min(3,EXTERNAL_REPLY_MAX):EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, enabled: EXTERNAL_REPLY_ENABLED, event });
     const ctx = await chromium.launchPersistentContext(PROFILE_DIR, {
       executablePath: chromeExe(), headless: HEADLESS, chromiumSandbox: true,
       viewport: { width: 1440, height: 1000 }, args: ['--disable-blink-features=AutomationControlled']
@@ -498,7 +521,8 @@ async function browserLoop() {
         } else {
           fs.writeFileSync(candidatesFile, JSON.stringify({ scannedAt: state.lastThreadsScanAt, queries: DISCOVERY_QUERIES, candidates: r.candidates.map(c => ({...c, evaluation: scoreCandidate(c, { ownUsername })})) }, null, 2), 'utf8');
           event('THREADS_SCAN', { count: r.candidates.length, eligible: state.lastEligibleReplyCount, queries: DISCOVERY_QUERIES.length });
-          const rr = await replyEngine.run(page, r.candidates);
+          const replyCandidates=DAILY_CYCLE_ENABLED?selectApprovedDailyReplies({...readDailyCycleDocuments(),jstDate:dayKey(),journal:todayLocalPosts(),candidates:r.candidates,replyHistory:readJsonl(path.join(DATA_DIR,'external-replies.jsonl')),ownUsername}):r.candidates;
+          const rr = await replyEngine.run(page, replyCandidates);
           state.lastExternalReplyResult = rr;
           if (rr.posted > 0) state.lastExternalReplyAt = new Date().toISOString();
           state.browserOk = true; state.lastBrowserError = null;
@@ -526,7 +550,7 @@ http.createServer(async (req, res) => {
     try { th = await threadsHealth(); } catch (e) { th = { ok: false, error: e.message }; }
     res.end(JSON.stringify({
       ok: true, mode: 'm8-local-only', state, threads: th,
-      autoPostEnabled: AUTO_POST_ENABLED, slots: SLOTS, maxPostsPerDay: MAX_POSTS,
+      autoPostEnabled: AUTO_POST_ENABLED, dailyCycleEnabled: DAILY_CYCLE_ENABLED, slots: SLOTS, maxPostsPerDay: MAX_POSTS,
       imagePosting: { cardGenerationEnabled: IMAGE_CARD_ENABLED, browserPublishingEnabled: IMAGE_POST_ENABLED, browserReady: Boolean(imageBrowserContext), lastResult: state.lastImagePostResult, lastError: state.lastImagePostError },
       externalReply: { enabled: EXTERNAL_REPLY_ENABLED, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, browserOk: state.browserOk, lastError: state.lastBrowserError, discoveryQueries: DISCOVERY_QUERIES },
       externalRuntimeDependencies: [], directExternalApis: ['Meta Threads API','Rakuten API']
