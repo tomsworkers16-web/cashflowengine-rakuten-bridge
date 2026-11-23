@@ -24,6 +24,29 @@ function variantSection(text,label,nextLabels) {
   // avoid reaching into other products or promotional content.
   return text.slice(start,end).slice(0,1200);
 }
+// The original extractor recognised almost exclusively one chest layout.
+// For other products, accept only unambiguous labelled values in a bounded
+// product-description region, never marketing claims or inferred specs.
+function generalSpecs(text) {
+  const starts=[...text.matchAll(/(?:商品仕様|商品詳細|商品情報|商品説明)\s*[:：]?/gu)];
+  const regions=starts.map(m=>text.slice(m.index+m[0].length,m.index+m[0].length+1800).split(/関連商品|おすすめ商品|こちらもおすすめ|商品レビュー|他の商品|ショップレビュー/u)[0]);
+  const rules=[
+    ['material',/(?:材質|素材)\s*[:：]?\s*((?:ポリプロピレン|ポリエチレン|ポリエステル|ステンレス(?:鋼)?|シリコーン(?:ゴム)?|シリコン(?:ゴム)?|ABS樹脂|綿100[%％]|綿１００[%％]))(?=\s|[、。／/]|$)/gu],
+    ['dimensions',/(?:本体サイズ|商品サイズ|外寸|本体寸法)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:cm|mm)?\s*[×xX]\s*\d+(?:\.\d+)?\s*(?:cm|mm)?(?:\s*[×xX]\s*\d+(?:\.\d+)?)?\s*(?:cm|mm))/gu],
+    ['product_weight',/(?:本体重量|商品重量|本体質量)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:kg|g))\b/gu],
+    ['capacity',/(?:満水容量|実容量|容量)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:mL|ml|L|リットル))\b/gu],
+    ['heat_resistance',/耐熱温度\s*[:：]?\s*(約?\s*\d{1,3}\s*(?:℃|°C))/gu],
+    ['load_capacity',/耐荷重\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*kg)\b/gu],
+    ['cable_length',/(?:ケーブル長|コード長)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:cm|m))\b/gu]
+  ];
+  const out=[];
+  for(const [id,re] of rules){
+    const matches=regions.flatMap(region=>[...region.matchAll(re)]).filter(m=>clean(m[0]).normalize('NFKC').replace(/\s+/gu,'').length>=8&&clean(m[0]).length<=150);
+    const distinct=new Set(matches.map(m=>clean(m[0]).normalize('NFKC').replace(/\s+/gu,'')));
+    if(distinct.size===1){const quote=clean(matches[0][0]);out.push({id,quote,claim:quote+'と記載'});}
+  }
+  return out;
+}
 export function extractEditorialSpecQuotes(html,{max=10}={}) {
   if(!Number.isInteger(max)||max<2||max>12)throw new Error('invalid_spec_limit');
   const text=extractProductPageText(html);
@@ -40,6 +63,9 @@ export function extractEditorialSpecQuotes(html,{max=10}={}) {
       m=>label+'の引出し内寸は幅'+m[1]+'×奥行'+m[2]+'×深さ'+m[3]+'cmと記載'));
     add(exactMatch(section,/耐荷重\s*[:：]?\s*天板\s*[（(]?約[）)]?\s*(\d+(?:\.\d+)?)\s*kg\s*[、,]\s*引出し1段あたり\s*[（(]?約[）)]?\s*(\d+(?:\.\d+)?)\s*kg/iu,key+'_load_capacity',
       m=>label+'の耐荷重は天板約'+m[1]+'kg、引出し1段あたり約'+m[2]+'kgと記載'));
+  }
+  if(!variantNames.some(([,label])=>text.includes('【'+label+'】'))){
+    for(const spec of generalSpecs(text))add(spec);
   }
   return {
     status:plans.length>=2?'spec_quotes_extracted':'research_required',
