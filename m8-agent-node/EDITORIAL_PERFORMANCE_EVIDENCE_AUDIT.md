@@ -50,3 +50,18 @@ node --test test/editorial-performance-article-integration.test.js
 ```
 
 入力JSON内に `performanceRecords` が既に存在する場合は、`--ledger` を併用しない。不正または未取得の台帳はエラーとし、実績ゼロ扱いにしない。本番台帳を用いた実測は未実施。
+
+## 楽天注文明細CSVの実ファイル検証（2026-11-23）
+
+オーナーから取得した2026年11月の注文明細CSVはUTF-8 BOM付き、先頭にタイトルとステータス等の凡例、次に日本語・英語の11列のヘッダーがある。実測では注文行0件。これは当該ファイルの状態で、アカウント全体の利益ゼロや初収益記録との一致を証明しない。
+
+列は発生日、成果報酬、料率、売上金額、ジャンル名、ショップ名、商品名、ステータス、リンクタイプ、デバイスタイプ、計測ID。商品コード・一意な注文ID・商品別クリック・費用はない。凡例を注文行と誤認しない。注文情報・計測IDの値は外部出力せず、元CSVもコミットしない。
+
+計測IDは楽天公式リンク作成機能で設定できるが、既存リンクとの対応・商品クリックの取得方法は未確認。リンク改変や投稿変更をせず、購入商品と紹介商品の同一性を推定しない。
+
+```powershell
+node src/run-rakuten-order-report-audit.js order.csv
+node --test test/rakuten-order-report-audit.test.js
+```
+
+監査は実ファイルで `empty_order_report` と判定。非空の注文行は模擬入力で形状のみ検査済み。実データによる金額・ステータス・計測IDの意味検証を完了するまで、既存の利益台帳と混ぜない。公式参照: https://affiliate.rakuten.co.jp/guides/report/ および https://affiliate.rakuten.co.jp/guides/link/ 。
