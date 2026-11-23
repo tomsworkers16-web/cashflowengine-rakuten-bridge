@@ -7,3 +7,7 @@ The existing three JST slots become one coherent daily theme: 07:30 reader-first
 No production configuration, owner approval, live publication or real Rakuten/Threads experiment is performed by these development changes. M8 installation, existing task compatibility, real product evidence, and live end-to-end verification are still required. This cycle does not implement note/ROOM features, image publishing, or automatic approval of future content.
 
 Tests: `node --test test/threads-daily-cycle.test.js test/threads-daily-preparation.test.js` (mocked APIs, no live calls).
+
+## Pre-activation check
+
+Run from the installed M8 agent directory with the existing environment: `node --env-file=.env src/preview-threads-daily-cycle.js --read-only-research`. This bounded Rakuten-only research prints redacted sample copy and the closed publication gate. It writes neither a proposal nor an approval, does not access Threads or change services, and returns exit 2 when evidence is insufficient. It must not be treated as a live publication test. Actual approval to install/change the production runtime, code deployment, and verification of the first approved three-slot sequence are separate. Keep the current running version unchanged until that approval; enable the opt-in only after an approved installation and a successful read-only rehearsal. Rollback is disabling the opt-in and returning to the prior approved revision through the existing deployment process.

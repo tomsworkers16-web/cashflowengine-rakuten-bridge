@@ -22,6 +22,10 @@ test('unverified, stale or mismatched product evidence holds all stages',()=>{
  }
 });
 test('recently featured item is not repeated on the next day',()=>{const p=planThreadsDailyCycle({...input,history:[{jstDate:'2026-11-23',meta:{itemCode:item.itemCode}}]});assert.equal(p.slots.length,0);});
+test('identical recently confirmed guide is not repeated with a different item',()=>{
+ const p=plan();const history=[{...posted(p,0),jstDate:'2026-11-23',meta:{publishStatus:'posted',itemCode:'other:1'}}];
+ const next=planThreadsDailyCycle({...input,history});assert.equal(next.status,'research_required');assert.equal(next.held[0].reason,'recent_editorial_copy');
+});
 test('missing approval and edits after approval are blocked',()=>{const p=plan();assert.equal(slot(p,'07:30',{approval:null}).reason,'approval_missing_or_changed');p.slots[0].text+='変更';assert.equal(slot(p,'07:30').reason,'approval_missing_or_changed');});
 test('no PR before column and comparison are verified',()=>{const p=plan();assert.equal(slot(p,'19:30').reason,'previous_stage_not_verified');assert.equal(slot(p,'19:30',{journal:[posted(p,0),posted(p,1,'uncertain')]}).reason,'previous_stage_not_verified');assert.equal(slot(p,'19:30',{journal:[posted(p,0),posted(p,1)]}).status,'eligible_for_existing_publisher');});
 test('another campaign, different text, stale date or previously attempted slot is blocked',()=>{const p=plan();const row=posted(p,0);row.meta.campaignId='different';assert.equal(slot(p,'12:30',{journal:[row]}).reason,'previous_stage_not_verified');assert.equal(slot(p,'07:30',{journal:[posted(p,0,'pending')]}).reason,'slot_already_attempted');assert.equal(slot(p,'07:30',{jstDate:'2026-11-25'}).reason,'missing_or_stale_plan');assert.equal(slot(p,'07:30',{officialPostCount:3}).reason,'daily_cap_reached');});

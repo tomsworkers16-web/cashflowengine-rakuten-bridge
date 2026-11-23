@@ -40,10 +40,16 @@ function compose(candidate, research, date){
  const gate=evaluateEditorialDraft(generated.draft);
  if(gate.status!=='review_candidate')return {reason:'editorial_quality_gate_failed'};
  const column=guide.title+'\n\n'+guide.column;
- const comparison=guide.title+'：確認したい3つのこと\n\n'+guide.checks.map((v,i)=>(i+1)+'．'+v).join('\n');
+ // Use the actual evidence-backed editorial draft, including supported variant
+ // comparisons, rather than discarding it in favour of a generic checklist.
+ const checks=generated.draft.purchaseChecks.map((v,i)=>(i+1)+'．'+v.howToCheck);
+ const detailed=guide.title+'：確認したい3つのこと\n\n'+checks.join('\n')+'\n\n販売ページの例：'+str(facts[0].claim)+'。';
+ const comparison=validatePublicationText(detailed)?guide.title+'：確認したい3つのこと\n\n'+checks.join('\n'):detailed;
  const name=cleanProductName(candidate.itemName,35),url=research.affiliateUrl;
  let revenue=null;
- for(const fact of facts){
+ const relevance=f=>/inner_dimensions|load_capacity|dimensions|capacity|compatibility|operating_condition/u.test(f.id)?2:/material|assembly/u.test(f.id)?1:0;
+ const prFacts=[...facts].sort((a,b)=>relevance(b)-relevance(a));
+ for(const fact of prFacts){
   for(const parts of [[name,str(fact.claim),'購入前に使う場所と条件を確認してください。'],[cleanProductName(candidate.itemName,20),str(fact.claim)]]){
    const candidateText='【PR】'+parts.join('\n')+'\n'+url;
    if(!validatePublicationText(candidateText,{revenue:true,affiliateUrl:url})){revenue=candidateText;break;}
@@ -78,11 +84,13 @@ export function planDailyReplySuggestions({candidates=[],history=[],ownUsername=
 export function planThreadsDailyCycle({jstDate,ranking, researchByItemCode={},performanceRecords,history=[],replyCandidates=[],replyHistory=[],ownUsername='',max=5}={}){
  if(!dayValid(jstDate)||!Array.isArray(history))throw new TypeError('invalid_daily_inputs');
  const used=recentItems(history,jstDate);
+ const recentGuide=new Set(history.filter(r=>dayValid(r?.jstDate)&&dayTime(r.jstDate)<dayTime(jstDate)&&dayTime(jstDate)-dayTime(r.jstDate)<=2*86400000&&verifiedPost(r)).map(r=>r.text));
  const shortlist=buildEditorialShortlist(ranking.filter(x=>!used.has(x?.itemCode)),{max,performanceRecords});
  const held=[];
  for(const candidate of shortlist.selected){
   const attempt=compose(candidate,researchByItemCode[candidate.itemCode],jstDate);
   if(!attempt.slots){held.push({itemCode:candidate.itemCode,reason:attempt.reason});continue;}
+  if(attempt.slots.slice(0,2).some(s=>recentGuide.has(s.text))){held.push({itemCode:candidate.itemCode,reason:'recent_editorial_copy'});continue;}
   const plan={version:'threads-daily-cycle-v1',mode:'review_only',jstDate,campaignId:keyOf(jstDate,candidate.itemCode),itemCode:candidate.itemCode,theme:candidate.theme,slots:attempt.slots,gateScore:attempt.gateScore,publishApproved:false,published:0,
    replySuggestions:planDailyReplySuggestions({candidates:replyCandidates,history:replyHistory,ownUsername,theme:candidate.theme,date:jstDate})};
   return {...plan,digest:planDigest(plan),status:'batch_review_required',held,performance:shortlist.performance??null};
