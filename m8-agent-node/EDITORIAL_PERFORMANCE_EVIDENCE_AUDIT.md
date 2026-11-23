@@ -20,3 +20,18 @@ node src/run-editorial-performance-evidence-audit.js
 - `item_evidence_schema_present`: 必須項目が揃ったレコードあり。出所、対象期間、重複・帰属・費用範囲を別途確認してから研究用優先度へ接続する。
 
 本番データでの監査は未実施。実際の報告形式を確認するまでは、商品別利益を根拠とした推薦・公開を有効化しない。main統合・M8への配布はオーナー承認後。
+
+## 商品選定への接続（開発ブランチ・オフライン）
+
+既存 `prioritizeEditorialResearch` が同じ監査ロジックを使用する。確定済み・項目完備の重複しない行のみ集計し、同一商品の不完全行・暫定報酬・矛盾IDがあれば確定利益判定を保留する。日別集計は除外する。
+
+- `validated_candidate`: 必要なクリック母数を満たし、報告上の確定純利益が正の研究候補。
+- `experiment`: データ不足、利益ゼロ、少数サンプル、暫定報酬など。既存の候補優先度を参考に検証する。
+- `loss_review`: 報告上の確定純利益が負のため再検討する候補。
+
+`validated_candidate` は出所を独立に検証した意味ではない。すべて公開不可、投稿別帰属なし。商品選定の研究用プレビューであり、本番投稿エンジンには接続していない。
+
+```powershell
+node --test test/editorial-performance-evidence-audit.test.js test/editorial-performance-priority.test.js
+node src/run-editorial-performance-priority.js input.json
+```
