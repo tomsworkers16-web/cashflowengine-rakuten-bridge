@@ -51,3 +51,24 @@ test('ranking probe produces separate shortlist without posting',async()=>{
  assert.equal(out.persistencePerformed,false);
  assert.doesNotMatch(JSON.stringify(out),/secret/);
 });
+
+
+test('rejects Zoff lucky bag misclassified by accessory wording',()=>{
+ const bag=product(11,'zoff','【Zoff 福袋2027】メガネ券付き メガネマット',6600);
+ assert.equal(evaluateRankingCandidate(bag),null);
+ const chest=product(24,'e-kurashi','コロ脚 壁付き チェスト 収納ケース',4999);
+ assert.equal(evaluateRankingCandidate(chest).theme,'storage');
+ assert.deepEqual(buildEditorialShortlist([bag,chest],{max:2}).selected.map(x=>x.itemCode),[chest.itemCode]);
+});
+
+test('real 2026-11-19 ranking products are not misclassified by incidental words',()=>{
+ const fish=product(20,'kouragumi','骨取りサバ切身 1kg 無塩or有塩 冷凍食品');
+ const underwear=product(26,'renfrojapan','着るホカロン あったかインナー 綿混 カップなし');
+ const chocolate=product(3,'suzuyaebisudo','リンツ リンドール 訳あり 60粒 チョコ');
+ assert.equal(classifyTheme(fish.itemName),'food');
+ assert.equal(classifyTheme(underwear.itemName),'apparel');
+ assert.equal(classifyTheme(chocolate.itemName),'food');
+ assert.equal(classifyTheme('密閉容器 冷凍保存OK'),'food_preservation');
+ assert.equal(classifyTheme('カップ付き収納ケース'),'storage');
+ assert.ok(evaluateRankingCandidate(fish).priority<evaluateRankingCandidate(product(24,'e-kurashi','壁付きチェスト 収納ケース')).priority);
+});
