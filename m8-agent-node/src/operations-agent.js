@@ -11,6 +11,9 @@ import { runRakutenNightlyCapture } from './rakuten-nightly-capture.js';
 import { summarizeRevenueCopyVariants } from './revenue-copy-experiment.js';
 import { selectPostsForInsights } from './post-insights-selection.js';
 import { summarizeRecentAffiliateEvidence } from './rolling-revenue-evidence.js';
+import { prepareDailyThreadsCycle } from './threads-daily-preparation.js';
+import { summarizeDailyCycleOutcome } from './threads-daily-cycle.js';
+import { rakutenCooldownRemaining } from './rakuten-rate-policy.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -209,6 +212,9 @@ async function buildNightReport(day = dayKey()) {
   };
 
   report.revenueDecisions = decideRevenueActions(report);
+  if(process.env.CFE_THREADS_DAILY_CYCLE_ENABLED==='true'){
+    report.dailyCycle=summarizeDailyCycleOutcome({plan:readJson(path.join(dataDir,'threads-daily-proposal.json'),null),jstDate:day,journal:postJournal,insights:postInsights});
+  }
   report.firstCommissionFunnel = diagnoseFirstCommission(report);
   // Rakuten day-level CSV can lag behind the posting date. Preserve past
   // observed commission even when today's report row is not yet available.
@@ -252,6 +258,32 @@ function updateEnv(values) {
 function recentReports(limit = 3) {
   if (!fs.existsSync(reportsDir)) return [];
   return fs.readdirSync(reportsDir).filter(x => /-night\.json$/.test(x)).sort().reverse().slice(0, limit).map(x => readJson(path.join(reportsDir, x), null)).filter(Boolean);
+}
+
+async function prepareDailyCycleProposal(current){
+  const day=dayKey(),file=path.join(dataDir,'threads-daily-proposal.json');
+  const present=readJson(file,null);
+  if(present?.jstDate===day)return {status:'existing_proposal_preserved',digest:present.digest??null};
+  if(rakutenCooldownRemaining(current.lastRakutenRateLimitAt)>0)return {status:'research_required',reason:'rakuten_rate_limit_cooldown'};
+  const ledger=readJson(path.join(dataDir,'affiliate-results.json'),null);
+  const snapshot=readJson(candidatesFile,null);
+  const snapshotAge=Date.now()-Date.parse(snapshot?.scannedAt||'');
+  let plan;
+  try{
+    plan=await prepareDailyThreadsCycle({jstDate:day,applicationId:process.env.RAKUTEN_APPLICATION_ID,
+      accessKey:process.env.RAKUTEN_ACCESS_KEY,affiliateId:process.env.RAKUTEN_AFFILIATE_ID,
+      performanceRecords:Array.isArray(ledger?.records)?ledger.records:undefined,history:readJsonl(postsFile),
+      replyCandidates:Number.isFinite(snapshotAge)&&snapshotAge>=0&&snapshotAge<=24*3600000&&Array.isArray(snapshot?.candidates)?snapshot.candidates:[],
+      replyHistory:readJsonl(repliesFile),ownUsername:current.threadsUsername||''});
+  }catch{return {status:'research_required',reason:'proposal_preparation_failed'};}
+  plan={...plan,jstDate:day};
+  // The approval is a separate owner-created document. Never overwrite it.
+  // Publishing reads a complete immutable proposal, not a partially written file.
+  const temp=file+'.tmp-'+process.pid;
+  try{fs.writeFileSync(temp,JSON.stringify(plan,null,2),'utf8');fs.renameSync(temp,file);}
+  finally{if(fs.existsSync(temp))fs.rmSync(temp,{force:true});}
+  return {status:plan.status,reason:plan.reason??null,digest:plan.digest??null,slots:plan.slots?.length??0,
+    replySuggestions:plan.replySuggestions?.length??0,performanceLedgerAvailable:Array.isArray(ledger?.records),published:0};
 }
 
 async function runDailyCommander() {
@@ -322,6 +354,12 @@ async function runDailyCommander() {
     },
     reasons
   };
+
+  if(String(process.env.CFE_THREADS_DAILY_CYCLE_ENABLED||'false').toLowerCase()==='true'){
+    strategy.settings.CFE_EXTERNAL_REPLY_MAX_PER_DAY=Math.min(3,maxReplies);
+    try{strategy.dailyCycle=await prepareDailyCycleProposal(current);}
+    catch{strategy.dailyCycle={status:'research_required',reason:'proposal_save_failed',published:0};}
+  }
 
   const applied = updateEnv(strategy.settings);
   strategy.applied = applied;
