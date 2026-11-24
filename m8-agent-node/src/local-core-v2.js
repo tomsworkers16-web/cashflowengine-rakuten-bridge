@@ -15,6 +15,7 @@ import { approvedImageFor, renderProductCard, publishImageBrowser } from './imag
 import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
 import { DAILY_SLOTS, DAILY_AUTO_POLICY, selectDailyStage, selectApprovedDailyReplies } from './threads-daily-cycle.js';
 import { dailyAutoEnabled, dailyCycleEnabled } from './threads-daily-policy.js';
+import {runInboundMonitor,inboundMonitorEnabled} from './threads-inbound-monitor.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -41,6 +42,7 @@ const SLOT_WINDOW_MIN = Number(env.CFE_SLOT_WINDOW_MINUTES || 20);
 const SLOTS = (env.CFE_POST_SLOTS || '07:30,12:30,19:30').split(',').map(s => s.trim()).filter(Boolean);
 const KEYWORDS = (env.RAKUTEN_KEYWORDS || 'キッチン 便利グッズ,収納 便利グッズ,家事 時短,掃除 便利グッズ,スマホ 便利グッズ').split(',').map(s => s.trim()).filter(Boolean);
 const EXTERNAL_REPLY_ENABLED = String(env.CFE_EXTERNAL_REPLY_ENABLED || 'false').toLowerCase() === 'true';
+const inboundMonitor=()=>inboundMonitorEnabled(DATA_DIR,env);
 const EXTERNAL_REPLY_MAX = Math.max(1, Math.min(10, Number(env.CFE_EXTERNAL_REPLY_MAX_PER_DAY || 3)));
 const EXTERNAL_REPLY_MIN_SCORE = Math.max(20, Math.min(90, Number(env.CFE_EXTERNAL_REPLY_MIN_SCORE || 45)));
 const DISCOVERY_QUERIES = (env.THREADS_DISCOVERY_QUERIES || '家事 時短,収納 困る,掃除 面倒,献立 悩み,便利グッズ').split(',').map(s => s.trim()).filter(Boolean).slice(0, 5);
@@ -556,6 +558,7 @@ http.createServer(async (req, res) => {
       autoPostEnabled: AUTO_POST_ENABLED, dailyCycleEnabled: dailyCycle(), dailyAutoPublishEnabled: dailyCycle()&&dailyAuto(), slots: SLOTS, maxPostsPerDay: MAX_POSTS,
       imagePosting: { cardGenerationEnabled: IMAGE_CARD_ENABLED, browserPublishingEnabled: IMAGE_POST_ENABLED, browserReady: Boolean(imageBrowserContext), lastResult: state.lastImagePostResult, lastError: state.lastImagePostError },
       externalReply: { enabled: EXTERNAL_REPLY_ENABLED, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, browserOk: state.browserOk, lastError: state.lastBrowserError, discoveryQueries: DISCOVERY_QUERIES },
+      inboundReply: {monitorEnabled:inboundMonitor(),autoSendEnabled:false,lastScan:state.lastInboundReview??null},
       externalRuntimeDependencies: [], directExternalApis: ['Meta Threads API','Rakuten API']
     }, null, 2)); return;
   }
@@ -575,3 +578,11 @@ setInterval(() => postingTick().catch(() => {}), 60000);
 nightlyTick().catch(e=>event('NIGHT_EVAL_ERROR',{error:e.message}));
 setInterval(() => nightlyTick().catch(e=>event('NIGHT_EVAL_ERROR',{error:e.message})), 60000);
 browserLoop().catch(() => {});
+let inboundBusy=false;
+async function inboundTick(){
+ if(!inboundMonitor()||inboundBusy)return;inboundBusy=true;
+ try{state.lastInboundReview=await runInboundMonitor({dir:DATA_DIR,token:THREADS_ACCESS_TOKEN});event('INBOUND_REVIEW_SCAN',state.lastInboundReview);}
+ catch(e){state.lastInboundReview={scannedAt:new Date().toISOString(),status:'hold',reason:/^(threads_http_\d{3}|missing_token|wrong_account|invalid_response)$/.test(e.message)?e.message:'read_failed',published:0};}
+ finally{inboundBusy=false;saveState();}
+}
+inboundTick().catch(()=>{});setInterval(()=>inboundTick().catch(()=>{}),30*60000);
