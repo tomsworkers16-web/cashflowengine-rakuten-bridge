@@ -16,6 +16,7 @@ import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMa
 import { DAILY_SLOTS, DAILY_AUTO_POLICY, selectDailyStage, selectApprovedDailyReplies } from './threads-daily-cycle.js';
 import { dailyAutoEnabled, dailyCycleEnabled } from './threads-daily-policy.js';
 import {runInboundMonitor,inboundMonitorEnabled} from './threads-inbound-monitor.js';
+import {runInboundAuto,readInboundAutoPolicy} from './threads-inbound-auto.js';
 
 const env = process.env;
 const DATA_DIR = path.resolve(env.CFE_DATA_DIR || '.data');
@@ -558,7 +559,7 @@ http.createServer(async (req, res) => {
       autoPostEnabled: AUTO_POST_ENABLED, dailyCycleEnabled: dailyCycle(), dailyAutoPublishEnabled: dailyCycle()&&dailyAuto(), slots: SLOTS, maxPostsPerDay: MAX_POSTS,
       imagePosting: { cardGenerationEnabled: IMAGE_CARD_ENABLED, browserPublishingEnabled: IMAGE_POST_ENABLED, browserReady: Boolean(imageBrowserContext), lastResult: state.lastImagePostResult, lastError: state.lastImagePostError },
       externalReply: { enabled: EXTERNAL_REPLY_ENABLED, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, browserOk: state.browserOk, lastError: state.lastBrowserError, discoveryQueries: DISCOVERY_QUERIES },
-      inboundReply: {monitorEnabled:inboundMonitor(),autoSendEnabled:false,lastScan:state.lastInboundReview??null},
+      inboundReply: {monitorEnabled:inboundMonitor(),autoSendEnabled:inboundMonitor()&&Boolean(readInboundAutoPolicy(DATA_DIR)),lastScan:state.lastInboundReview??null,lastAutoResult:state.lastInboundAutoResult??null},
       externalRuntimeDependencies: [], directExternalApis: ['Meta Threads API','Rakuten API']
     }, null, 2)); return;
   }
@@ -581,7 +582,9 @@ browserLoop().catch(() => {});
 let inboundBusy=false;
 async function inboundTick(){
  if(!inboundMonitor()||inboundBusy)return;inboundBusy=true;
- try{state.lastInboundReview=await runInboundMonitor({dir:DATA_DIR,token:THREADS_ACCESS_TOKEN});event('INBOUND_REVIEW_SCAN',state.lastInboundReview);}
+ try{state.lastInboundReview=await runInboundMonitor({dir:DATA_DIR,token:THREADS_ACCESS_TOKEN});event('INBOUND_REVIEW_SCAN',state.lastInboundReview);
+  if(readInboundAutoPolicy(DATA_DIR)&&state.lastInboundReview.complete&&state.lastInboundReview.reviewCount>0){try{state.lastInboundAutoResult=await runInboundAuto({dir:DATA_DIR,token:THREADS_ACCESS_TOKEN});event('INBOUND_AUTO_RESULT',state.lastInboundAutoResult);}catch{state.lastInboundAutoResult={status:'hold',reason:'auto_review_failed'};}}
+ }
  catch(e){state.lastInboundReview={scannedAt:new Date().toISOString(),status:'hold',reason:/^(threads_http_\d{3}|missing_token|wrong_account|invalid_response)$/.test(e.message)?e.message:'read_failed',published:0};}
  finally{inboundBusy=false;saveState();}
 }

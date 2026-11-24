@@ -48,7 +48,7 @@ export function planInboundReplies({account,root,conversation,attempts=[],now=Da
   const parent=own.get(ref(r.replied_to)),t=Date.parse(r.timestamp||'');
   if(!id(r.id)||seen.has(r.id)||already.has(r.id)||!parent||ref(r.root_post)!==root.id||r.is_reply!==true||!name(r.username)||name(r.username)===ACCOUNT||!['NOT_HUSHED','UNHUSHED'].includes(r.hide_status)||!Number.isFinite(t)||t>now||now-t>48*3600000)continue;
   seen.add(r.id);const d=draftInboundReply(r.text,parent.text,root.text);
-  const result={targetId:r.id,rootId:root.id,parentId:parent.id,username:r.username,sourceText:r.text,parentText:parent.text,status:d.status,reason:d.reason??null,draft:d.text??null,topic:d.topic??null,intent:d.intent??null};
+  const result={targetId:r.id,rootId:root.id,parentId:parent.id,username:r.username,sourceText:r.text,parentText:parent.text,receivedAt:r.timestamp,status:d.status,reason:d.reason??null,draft:d.text??null,topic:d.topic??null,intent:d.intent??null};
   if(d.text)result.digest=hash([ACCOUNT,root.id,r.id,parent.id,r.username,r.text,parent.text,root.text,d.text]);
   out.push(result);
  }
