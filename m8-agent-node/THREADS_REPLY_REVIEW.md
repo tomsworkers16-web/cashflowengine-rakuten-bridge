@@ -7,3 +7,7 @@
 - 明示的に承認された1件についてのみ、`node --env-file=.env src/review-inbound-replies.js --send-approved <digest>` を実行できる。再取得時に内容が変われば保留。JST 1日1件、送信意図を事前記録、確認不能なら再送禁止。
 - 外部投稿の候補には `node --env-file=.env src/review-external-reply.js` を使用。承認記録は現時点では送信処理に接続されていない。
 - 公式APIを使う受信返信機能の権限（threads_read_replies, threads_manage_replies等）と実際の見え方はM8で検証する。本番有効化・定期送信は未実施。既存自己投稿は変更しない。
+
+## 受信コメントの定期監視
+
+統合・導入後、M8で `node --env-file=.env src/enable-inbound-monitor.js` を一度実行する。既存コアの稼働とアカウントを確認して、公式APIの読み取り専用監視を有効化する。30分間隔の取得で `.data/inbound-reply-review.json` に候補と保留を記録し、`/health` に件数・最終取得時刻を表示。候補0件は正常。監視自体には公開処理がなく、自動送信は無効。1件の実送信はオーナーによる対象本文確認・承認後に既存の限定送信手順で検証する。
