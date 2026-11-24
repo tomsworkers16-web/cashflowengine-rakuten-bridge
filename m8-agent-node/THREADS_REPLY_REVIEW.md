@@ -7,6 +7,10 @@
 - `node --env-file=.env src/review-inbound-replies.js` は読み取り専用。候補の本文・親投稿・下書き・ダイジェストを表示する。Tokenや生APIエラーを表示しない。
 - 明示的に承認された1件についてのみ、`node --env-file=.env src/review-inbound-replies.js --send-approved <digest>` を実行できる。再取得時に内容が変われば保留。JST 1日1件、送信意図を事前記録、確認不能なら再送禁止。
 - 外部投稿の候補には `node --env-file=.env src/review-external-reply.js` を使用。承認記録は現時点では送信処理に接続されていない。
+
+## 外部投稿の公式APIレビュー（個別承認）
+
+`node --env-file=.env src/review-external-official.js` は当日のテーマで公式APIを1回検索し、明確に助言を求める投稿に限り、具体的な返信案を最大1件表示する。フォロワー数や広告効果は選定条件にしない。リンク・営業誘導・未確認商品・無関係な話題は除外。候補の本文と返信案を確認し、個別承認された場合だけ `node --env-file=.env src/review-external-official.js --send-approved <digest>` で1件を送信可能。再取得で本文や対象が変われば保留、日次上限と既返信・既試行の記録を厳守する。公式APIの検索・投稿取得・返信権限が不足する場合は停止し、代替の非公式操作はしない。定期的な無承認送信は行わない。既存の自己投稿／受信コメント限定の自動返信とは独立。
 - 公式APIを使う受信返信機能の権限（threads_read_replies, threads_manage_replies等）と実際の見え方はM8で検証する。本番有効化・定期送信は未実施。既存自己投稿は変更しない。
 
 ## 受信コメントの定期監視
