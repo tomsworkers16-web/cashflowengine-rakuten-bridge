@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {planThreadsDailyCycle} from '../src/threads-daily-cycle.js';
+import {reviewReplyCandidates,makeReplyApproval} from '../src/threads-reply-review.js';
+const date='2026-11-24',now=Date.parse(date+'T13:00:00+09:00');
+const item={itemCode:'shop:1',itemName:'収納チェスト ラック',rank:2,price:4999,hasAffiliateUrl:true};
+const page='https://item.rakuten.co.jp/shop/chest/';
+const research={itemCode:item.itemCode,productPageUrl:page,affiliateUrl:'https://hb.afl.rakuten.co.jp/ichiba/example/?pc='+encodeURIComponent(page),rights:{noMedia:true},facts:[{id:'dimensions',claim:'引き出しの内幅は26cmと記載',sourceUrl:page,checkedAt:date,evidenceQuote:'引き出し内幅26cm'},{id:'material',claim:'材質はポリプロピレンと記載',sourceUrl:page,checkedAt:date,evidenceQuote:'材質 ポリプロピレン'}]};
+const plan=planThreadsDailyCycle({jstDate:date,ranking:[item],researchByItemCode:{[item.itemCode]:research}});
+const candidate={author:'abc',url:'https://www.threads.com/@abc/post/abc1',text:'収納の片付けに困っているのですが、整理はどうしてる？毎日面倒で悩んでいます。'};
+const input={plan,date,now,ownUsername:'rakumitsu_select',journal:[{id:'first',jstDate:date,slot:'07:30',text:plan.slots[0].text,meta:{campaignId:plan.campaignId,publishStatus:'posted'}}],snapshot:{scannedAt:new Date(now).toISOString(),candidates:[candidate,{...candidate,author:'def',url:'https://www.threads.com/@def/post/def1'}]}};
+test('fresh related candidate yields one review-only draft and current source',()=>{const rows=reviewReplyCandidates(input);assert.equal(rows.length,1);assert.equal(rows[0].sourceText,candidate.text);assert.equal(rows[0].publishApproved,false);assert.match(rows[0].reviewDigest,/^[a-f0-9]{64}$/);});
+test('stale scan, missing publication, wrong account, and prior attempt all hold',()=>{for(const override of [{snapshot:{...input.snapshot,scannedAt:new Date(now-61*60000).toISOString()}},{journal:[]},{ownUsername:'another'},{history:[{jstDate:date,status:'unverified',url:candidate.url}]}])assert.deepEqual(reviewReplyCandidates({...input,...override}),[]);});
+test('unrelated or commercial material cannot produce review candidate',()=>{const rows=reviewReplyCandidates({...input,snapshot:{...input.snapshot,candidates:[{...candidate,text:'楽天の収納はPR広告です。収納に困っていませんか？'}]}});assert.deepEqual(rows,[]);});
+test('only the exact reviewed draft is approved; source change or wrong digest blocks',()=>{const [r]=reviewReplyCandidates(input);assert.equal(makeReplyApproval(input,r.reviewDigest).replyDraft,r.replyDraft);assert.equal(makeReplyApproval(input,'wrong'),null);assert.equal(makeReplyApproval({...input,snapshot:{...input.snapshot,candidates:[{...candidate,text:candidate.text+'追記'}]}},r.reviewDigest),null);});
