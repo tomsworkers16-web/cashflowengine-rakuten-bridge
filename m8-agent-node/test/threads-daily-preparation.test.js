@@ -28,3 +28,11 @@ test('official same-shop affiliate target supplies missing item URL and literal 
 test('official genre names scope discovery without more detail attempts',async()=>{
  const calls=[];const p=await prepareDailyThreadsCycle({...input,discover:async o=>{calls.push(o.genreId);return {editorialShortlist:{selected:[item]},results:{genre:{children:[{genreId:123,name:'インテリア・寝具・収納'}]}}};}});assert.deepEqual(calls,[undefined,123]);assert.equal(p.researchAttemptCount,1);
 });
+test('three unqualified products trigger a different official genre without weakening evidence',async()=>{
+ const first=[1,2,3].map(i=>({...item,itemCode:'bad'+i+':1',itemName:['収納チェスト','掃除ブラシ','キッチン調理用品'][i-1],rank:i}));const genres=[{genreId:123,name:'インテリア・寝具・収納'},{genreId:456,name:'キッチン用品'}];const calls=[];
+ const p=await prepareDailyThreadsCycle({...input,discover:async o=>{calls.push(o.genreId);return {editorialShortlist:{selected:o.genreId===456?[item]:first},results:{genre:{children:genres}}};},fetchEvidence:async code=>code===item.itemCode?input.fetchEvidence():{itemCode:code,status:'needs_product_detail_research',productPageUrl:'https://item.rakuten.co.jp/'+code.split(':')[0]+'/bad/',affiliateUrl:'https://hb.afl.rakuten.co.jp/ichiba/example/?pc='+encodeURIComponent('https://item.rakuten.co.jp/'+code.split(':')[0]+'/bad/')},fetchPage:async url=>url===page?input.fetchPage():{url,html:'<html>仕様不明</html>'}});
+ assert.deepEqual(calls,[undefined,123,456]);assert.equal(p.status,'batch_review_required');assert.equal(p.researchAttemptCount,4);assert.equal(p.researchHeld.length,3);
+});
+test('alternate genre rate limit stops further research',async()=>{
+ const calls=[];const p=await prepareDailyThreadsCycle({...input,discover:async o=>{calls.push(o.genreId);if(o.genreId===456)throw Error('rakuten_ranking_http_429');return {editorialShortlist:{selected:[item]},results:{genre:{children:[{genreId:123,name:'インテリア・寝具・収納'},{genreId:456,name:'キッチン用品'}]}}};},fetchPage:async()=>({url:page,html:'<html>仕様不明</html>'})});assert.equal(p.reason,'rakuten_rate_limited');assert.deepEqual(calls,[undefined,123,456]);assert.equal(p.researchAttemptCount,1);
+});
