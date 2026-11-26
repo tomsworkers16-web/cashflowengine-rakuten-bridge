@@ -27,7 +27,9 @@ test('official pc target may omit terminal slash but query or a different item r
 });
 test('identical recently confirmed guide is not repeated with a different item',()=>{
  const p=plan();const history=[{...posted(p,0),jstDate:'2026-11-23',meta:{publishStatus:'posted',itemCode:'other:1'}}];
- const next=planThreadsDailyCycle({...input,history});assert.equal(next.status,'research_required');assert.equal(next.held[0].reason,'recent_editorial_copy');
+ const next=planThreadsDailyCycle({...input,history});assert.equal(next.status,'batch_review_required');assert.notEqual(next.slots[0].text,p.slots[0].text);
+ const both=[...history,{...history[0],text:next.slots[0].text}];
+ const held=planThreadsDailyCycle({...input,history:both});assert.equal(held.status,'research_required');assert.equal(held.held[0].reason,'recent_editorial_copy');
 });
 test('missing approval and edits after approval are blocked',()=>{const p=plan();assert.equal(slot(p,'07:30',{approval:null}).reason,'approval_missing_or_changed');p.slots[0].text+='変更';assert.equal(slot(p,'07:30').reason,'approval_missing_or_changed');});
 test('no PR before column and comparison are verified',()=>{const p=plan();assert.equal(slot(p,'19:30').reason,'previous_stage_not_verified');assert.equal(slot(p,'19:30',{journal:[posted(p,0),posted(p,1,'uncertain')]}).reason,'previous_stage_not_verified');assert.equal(slot(p,'19:30',{journal:[posted(p,0),posted(p,1)]}).status,'eligible_for_existing_publisher');});
@@ -70,4 +72,25 @@ test('auto policy denies unapproved account, incomplete evidence, and uncertain 
 });
 test('standing policy cannot authorize an external reply',()=>{
  const p=autoPlan();assert.deepEqual(selectApprovedDailyReplies({plan:p,approval:null,autoPolicy:DAILY_AUTO_POLICY,jstDate:day,journal:[posted(p,0)]}),[]);
+});
+
+
+test('repeated cooking guide uses a distinct validated guide and holds when both were posted',()=>{
+ const cookware={...item,itemName:'調理用 フライパン'};
+ const verifiedResearch={...research,facts:[
+  {...research.facts[0],claim:'商品サイズ 約26×28cm と記載',evidenceQuote:'商品サイズ 約26×28cm'},
+  {id:'material',claim:'材質はステンレスと記載',sourceUrl:page,checkedAt:day,evidenceQuote:'材質 ステンレス'}
+ ]};
+ const request={...input,ranking:[cookware],researchByItemCode:{[cookware.itemCode]:verifiedResearch}};
+ const initial=planThreadsDailyCycle(request);
+ const confirmed=p=>({...posted(p,0),jstDate:'2026-11-23',meta:{publishStatus:'posted',itemCode:'other:1'}});
+ const next=planThreadsDailyCycle({...request,history:[confirmed(initial)]});
+ assert.equal(next.status,'batch_review_required');
+ assert.equal(next.policyEvidence.guideVariant,'cleanup');
+ assert.notEqual(next.slots[0].text,initial.slots[0].text);
+ assert.notEqual(next.slots[1].text,initial.slots[1].text);
+ assert.equal(next.slots[2].text,initial.slots[2].text);
+ assert.equal(slot(next,'07:30',auto).status,'eligible_for_existing_publisher');
+ const exhausted=planThreadsDailyCycle({...request,history:[confirmed(initial),confirmed(next)]});
+ assert.equal(exhausted.held[0].reason,'recent_editorial_copy');
 });

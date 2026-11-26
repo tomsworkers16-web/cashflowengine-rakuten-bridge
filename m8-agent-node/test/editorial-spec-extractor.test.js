@@ -49,3 +49,21 @@ test('bare title-only HTML provides no verified product specification',()=>{
  assert.equal(r.status,'research_required');
  assert.equal(r.quotePlans.length,0);
 });
+
+
+test('extracts labelled specifications seen in product HTML and API captions',()=>{
+ const spray=extractEditorialSpecQuotes('商品説明 サイズ 約71×89×206mm 容量 約100ml 重量 約207g');
+ assert.deepEqual(spray.quotePlans.map(x=>x.id),['dimensions','capacity']);
+ const towel=extractEditorialSpecQuotes('<h2>商品詳細</h2><p>材質 コットン 100％ 寸法 約500×800mm 表記は洗濯後の寸法</p>');
+ assert.deepEqual(towel.quotePlans.map(x=>x.id),['material','dimensions']);
+});
+
+test('does not combine variant dimensions with an unscoped material',()=>{
+ const result=extractEditorialSpecQuotes('商品仕様 サイズ Sサイズ：44.5×31.5×26cm Mサイズ：48×36×29cm 材質 ポリエステル');
+ assert.equal(result.quotePlans.length,0);
+});
+
+test('ignores conflicting dimensions and weight ranges',()=>{
+ const result=extractEditorialSpecQuotes('商品詳細 サイズ 71×89×206mm サイズ 81×89×206mm 重量 約1.2kg～3.4kg');
+ assert.equal(result.quotePlans.length,0);
+});
