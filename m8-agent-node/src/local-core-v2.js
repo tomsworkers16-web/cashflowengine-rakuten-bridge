@@ -13,8 +13,10 @@ import { keywordRelevanceBonus } from './product-relevance.js';
 import { EDITORIAL_POLICY_VERSION, editorialGuide, researchLane, researchSort, researchScore } from './editorial-strategy.js';
 import { approvedImageFor, renderProductCard, publishImageBrowser } from './image-card.js';
 import { publishTextOnce, findRecoverablePosts, postedNearAttempt, imageSubmitMayHaveHappened } from './posting-guard.js';
-import { DAILY_SLOTS, DAILY_AUTO_POLICY, selectDailyStage, selectApprovedDailyReplies } from './threads-daily-cycle.js';
-import { dailyAutoEnabled, dailyCycleEnabled } from './threads-daily-policy.js';
+import { DAILY_SLOTS, DAILY_AUTO_POLICY, selectDailyStage, selectApprovedDailyReplies,selectEveningResearchStage } from './threads-daily-cycle.js';
+import {prepareDailyThreadsCycle} from './threads-daily-preparation.js';
+import {readLocalEditorialJson,writeLocalEditorialJson,readProductStock,addProductStock,researchPhase,reserveResearch,summarizeEditorialAlert} from './editorial-resilience.js';
+import { dailyAutoEnabled, dailyCycleEnabled, editorialFallbackEnabled } from './threads-daily-policy.js';
 import {runInboundMonitor,inboundMonitorEnabled} from './threads-inbound-monitor.js';
 import {runInboundAuto,readInboundAutoPolicy} from './threads-inbound-auto.js';
 
@@ -110,7 +112,7 @@ function todayLocalPosts() { return readJsonl(postsFile).filter(x => String(x.js
 
 function readDailyCycleDocuments(){
  const read=name=>{try{const file=path.join(DATA_DIR,name);if(fs.statSync(file).size>256*1024)return null;return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}};
- return {plan:read('threads-daily-proposal.json'),approval:read('threads-daily-approval.json')};
+ return {plan:read('threads-daily-proposal.json'),approval:read('threads-daily-approval.json'),evening:read('editorial-evening-plan.json')};
 }
 
 async function fetchJson(url, { method = 'GET', attempts = 3, timeoutMs = 12000 } = {}) {
@@ -216,7 +218,9 @@ async function postFor(slot, { catchup = false } = {}) {
   // daily plan is missing, stale, unapproved or its preceding stage is uncertain.
   if(dailyCycle()){
     if(catchup||SLOTS.join(',')!==DAILY_SLOTS.join(',')){state.lastDecision='daily_cycle_slot_policy_hold';saveState();return;}
-    const action=selectDailyStage({...readDailyCycleDocuments(),autoPolicy:dailyAuto()?DAILY_AUTO_POLICY:undefined,accountUsername:state.threadsUsername,jstDate:dayKey(),slot,journal:todayLocalPosts(),officialPostCount:official.length});
+    const args={...readDailyCycleDocuments(),autoPolicy:dailyAuto()?DAILY_AUTO_POLICY:undefined,allowEditorialFallback:editorialFallbackEnabled(DATA_DIR),accountUsername:state.threadsUsername,jstDate:dayKey(),slot,journal:todayLocalPosts(),officialPostCount:official.length};
+    const eveningAction=selectEveningResearchStage(args);
+    const action=eveningAction.status==='eligible_for_existing_publisher'?eveningAction:selectDailyStage(args);
     if(action.status!=='eligible_for_existing_publisher'){state.lastDecision='daily_cycle_'+action.reason;saveState();return;}
     if(official.some(p=>String(p.text||'').trim()===action.text.trim())){state.lastDecision='duplicate_official_text';saveState();return;}
     const attempt=await publishTextOnce({text:action.text,slot,jstDate:dayKey(),meta:action.meta,
@@ -556,7 +560,8 @@ http.createServer(async (req, res) => {
     try { th = await threadsHealth(); } catch (e) { th = { ok: false, error: e.message }; }
     res.end(JSON.stringify({
       ok: true, mode: 'm8-local-only', state, threads: th,
-      autoPostEnabled: AUTO_POST_ENABLED, dailyCycleEnabled: dailyCycle(), dailyAutoPublishEnabled: dailyCycle()&&dailyAuto(), slots: SLOTS, maxPostsPerDay: MAX_POSTS,
+      autoPostEnabled: AUTO_POST_ENABLED, dailyCycleEnabled: dailyCycle(), dailyAutoPublishEnabled: dailyCycle()&&dailyAuto(), editorialFallbackEnabled:editorialFallbackEnabled(DATA_DIR), slots: SLOTS, maxPostsPerDay: MAX_POSTS,
+      editorialResilience:{stockCount:readProductStock(DATA_DIR,dayKey()).length,alert:readLocalEditorialJson(DATA_DIR,'editorial-alert.json'),lastResearch:readLocalEditorialJson(DATA_DIR,'editorial-research-result.json')},
       imagePosting: { cardGenerationEnabled: IMAGE_CARD_ENABLED, browserPublishingEnabled: IMAGE_POST_ENABLED, browserReady: Boolean(imageBrowserContext), lastResult: state.lastImagePostResult, lastError: state.lastImagePostError },
       externalReply: { enabled: EXTERNAL_REPLY_ENABLED, maxPerDay: EXTERNAL_REPLY_MAX, minScore: EXTERNAL_REPLY_MIN_SCORE, browserOk: state.browserOk, lastError: state.lastBrowserError, discoveryQueries: DISCOVERY_QUERIES },
       inboundReply: {monitorEnabled:inboundMonitor(),autoSendEnabled:inboundMonitor()&&Boolean(readInboundAutoPolicy(DATA_DIR)),lastScan:state.lastInboundReview??null,lastAutoResult:state.lastInboundAutoResult??null},
@@ -589,3 +594,31 @@ async function inboundTick(){
  finally{inboundBusy=false;saveState();}
 }
 inboundTick().catch(()=>{});setInterval(()=>inboundTick().catch(()=>{}),30*60000);
+
+// Same-day evening retry and next-day stock, once per phase even on restart.
+let editorialResearchBusy=false;
+async function editorialResilienceTick(){
+ if(!AUTO_POST_ENABLED||!dailyCycle()||!dailyAuto()||!editorialFallbackEnabled(DATA_DIR)||EXTERNAL_REPLY_ENABLED)return;
+ const day=dayKey(),minutes=jstMinutes(),{plan}=readDailyCycleDocuments();
+ const alert=summarizeEditorialAlert({jstDate:day,minutes,plan,journal:todayLocalPosts(),slotWindow:SLOT_WINDOW_MIN,lastDecision:state.lastDecision,eveningResult:readLocalEditorialJson(DATA_DIR,'editorial-research-result.json')});
+ const previous=readLocalEditorialJson(DATA_DIR,'editorial-alert.json');
+ if(JSON.stringify([previous?.jstDate,previous?.status,previous?.reasons,previous?.missedSlots])!==JSON.stringify([alert.jstDate,alert.status,alert.reasons,alert.missedSlots])){writeLocalEditorialJson(DATA_DIR,'editorial-alert.json',alert);if(alert.status==='attention')event('EDITORIAL_ATTENTION',alert);}
+ const phase=researchPhase(minutes);
+ if(!phase||editorialResearchBusy||state.threadsUsername!=='rakumitsu_select'||rakutenCooldownRemaining(state.lastRakutenRateLimitAt)>0||rakutenCooldownRemaining(readLocalEditorialJson(DATA_DIR,'editorial-research-cooldown.json')?.at)>0)return;
+ if(phase==='evening'&&(plan?.jstDate!==day||plan.status!=='editorial_fallback_review_required'))return;
+ if(!reserveResearch(DATA_DIR,day,phase))return;
+ editorialResearchBusy=true;
+ try{
+  const stock=readProductStock(DATA_DIR,day),ledger=readLocalEditorialJson(DATA_DIR,'affiliate-results.json');
+  const candidate=await prepareDailyThreadsCycle({jstDate:day,applicationId:RAKUTEN_APPLICATION_ID,accessKey:RAKUTEN_ACCESS_KEY,affiliateId:RAKUTEN_AFFILIATE_ID,
+   history:readJsonl(postsFile),performanceRecords:Array.isArray(ledger?.records)?ledger.records:undefined,preferredCandidates:phase==='evening'?stock.map(r=>r.candidate):[],desiredTheme:phase==='evening'?plan.theme:null,
+   excludedItemCodes:phase==='stock'?[...stock.map(r=>r.candidate.itemCode),plan?.itemCode].filter(Boolean):[],maxDetail:6});
+  if(candidate.reason==='rakuten_rate_limited')writeLocalEditorialJson(DATA_DIR,'editorial-research-cooldown.json',{at:new Date().toISOString()});
+  const qualified=addProductStock(DATA_DIR,candidate,day);
+  if(phase==='evening'&&qualified&&dayKey()===day&&jstMinutes()<19*60+30&&editorialFallbackEnabled(DATA_DIR)&&readDailyCycleDocuments().plan?.digest===plan.digest)writeLocalEditorialJson(DATA_DIR,'editorial-evening-plan.json',{fallbackDigest:plan.digest,plan:candidate});
+  const result={jstDate:day,phase,status:qualified?'qualified':'research_required',reason:qualified?null:candidate.reason||'product_quality_hold',attempts:candidate.researchAttemptCount??0,published:0};
+  writeLocalEditorialJson(DATA_DIR,'editorial-research-result.json',result);event('EDITORIAL_RESEARCH_RESULT',result);
+ }catch{const result={jstDate:day,phase,status:'research_required',reason:'research_runtime_error',published:0};writeLocalEditorialJson(DATA_DIR,'editorial-research-result.json',result);event('EDITORIAL_RESEARCH_RESULT',result);}
+ finally{editorialResearchBusy=false;}
+}
+editorialResilienceTick().catch(()=>{});setInterval(()=>editorialResilienceTick().catch(()=>{}),60000);
