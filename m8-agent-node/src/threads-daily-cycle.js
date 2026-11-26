@@ -10,6 +10,7 @@ import { apiSource } from './editorial-rakuten-evidence.js';
 export const DAILY_SLOTS=Object.freeze(['07:30','12:30','19:30']);
 export const DAILY_AUTO_POLICY='owner-approved-own-posts-v1';
 const roles=['column','comparison','revenue'];
+const fallbackRoles=['column','comparison','guide'];
 const THEMES={
  storage:{title:'収納を増やす前に',column:'収納が足りないと思ったら、まず出し入れの動きを見直したい。よく使う物を取り出すために、別の物を動かしていませんか？置き場所だけでなく、使う人が毎回無理なく戻せる位置かを確認すると、買い足すべき物も見えやすくなります。',checks:['設置面積に加えて開閉に必要な空間を測る。','入れたい物の最大寸法と内寸を比べる。','収納物の重さと耐荷重を照合する。'],words:/収納|片付|整理|棚|ラック|引き出し/u},
  cleaning:{title:'掃除道具を買う前に',column:'掃除をラクにしたくても、道具を出して、使って、洗って戻すまでの手間が増えるなら続きにくいもの。どの工程が面倒なのか先に書き出して、道具を増やすべきか、置き場所を変えるだけで済むか考えてみたいですね。',checks:['掃除対象の形状と道具のサイズを照合する。','洗い方・乾かし方と使う頻度を確認する。','消耗品の価格や交換方法、保管場所を調べる。'],words:/掃除|汚れ|ほこり|ホコリ|換気扇|片付/u},
@@ -25,11 +26,30 @@ const validPage=value=>{try{const u=new URL(value);return u.protocol==='https:'&
 const validAffiliate=value=>{try{const u=new URL(value);return u.protocol==='https:'&&u.hostname==='hb.afl.rakuten.co.jp'&&!u.port&&!u.username&&!u.password&&!u.hash&&/^\/(?:ichiba|hgc)\//.test(u.pathname);}catch{return false;}};
 function sameTarget(link,page){try{const u=new URL(link);if(u.searchParams.getAll('pc').length!==1)return false;const target=new URL(u.searchParams.get('pc'));if(target.protocol!=='https:'||target.hostname!=='item.rakuten.co.jp'||target.port||target.username||target.password||target.search||target.hash)return false;return target.origin+target.pathname.replace(/\/$/,'')+'/'===page;}catch{return false;}}
 const verifiedPost=r=>Boolean(r?.id)&&['posted','verified_posted'].includes(r?.meta?.publishStatus);
+const latestSlots=rows=>[...new Map(rows.map(r=>[r.slot,r])).values()];
 const sha=value=>createHash('sha256').update(JSON.stringify(value),'utf8').digest('hex');
 const keyOf=(date,itemCode)=>'cfe-daily-'+date+'-'+sha(itemCode).slice(0,12);
 const planDigest=plan=>sha([plan.jstDate,plan.campaignId,plan.itemCode,plan.theme,plan.slots.map(x=>[x.slot,x.role,x.text,x.affiliateUrl??null]),(plan.replySuggestions??[]).map(x=>[x.url,x.author,x.replyDraft,x.sourceDigest]),plan.policyEvidence??null]);
 function freshFact(f, page, date){return (f?.sourceUrl===page||(f?.sourceUrl===apiSource&&f?.sourceKind==='official_item_caption'&&str(f.evidenceQuote)&&f.claim==='楽天の商品説明：'+f.evidenceQuote+'と記載'))&&dayValid(f.checkedAt)&&dayTime(f.checkedAt)<=dayTime(date)&&dayTime(date)-dayTime(f.checkedAt)<=7*86400000&&str(f.claim)&&!/(?:https?:\/\/|【PR】)/i.test(f.claim);}
 function recentItems(history,date){const cutoff=dayTime(date)-7*86400000;return new Set(history.filter(r=>dayValid(r?.jstDate)&&dayTime(r.jstDate)>=cutoff&&dayTime(r.jstDate)<=dayTime(date)).map(r=>r.meta?.itemCode).filter(Boolean));}
+
+// Product-independent editorial copy: no product facts, links or claims of use.
+function fallbackSlots(theme){
+ const g=THEMES[theme];if(!g||!Object.hasOwn(THEMES,theme))return null;
+ return [g.title+'\n\n'+g.column,g.title+'：確認したい3つのこと\n\n'+g.checks.map((c,i)=>(i+1)+'．'+c).join('\n'),g.title+'：今日の小さな見直し\n\n'+g.checks[0]+' 今ある道具で困っていることを一つ書き出してみませんか？買い足す前に、置き方や使い方を変えられるか考えてみましょう。'].map((text,i)=>({slot:DAILY_SLOTS[i],role:fallbackRoles[i],text,affiliateUrl:null}));
+}
+export function planEditorialFallback({jstDate,history=[],reason='no_qualified_product'}={}){
+ if(!dayValid(jstDate)||!Array.isArray(history))throw TypeError('invalid_daily_inputs');
+ const recent=new Set(history.filter(r=>dayValid(r?.jstDate)&&dayTime(r.jstDate)>=dayTime(jstDate)-5*86400000&&dayTime(r.jstDate)<=dayTime(jstDate)).map(r=>r.text));
+ const themes=Object.keys(THEMES),offset=Math.floor(dayTime(jstDate)/86400000)%themes.length;
+ for(let i=0;i<themes.length;i++){
+  const theme=themes[(offset+i+themes.length)%themes.length],slots=fallbackSlots(theme);
+  if(slots.some(s=>recent.has(s.text)||validatePublicationText(s.text)))continue;
+  const p={version:'threads-daily-cycle-v1',mode:'review_only',jstDate,campaignId:keyOf(jstDate,'editorial:'+theme),itemCode:null,theme,slots,reason,replySuggestions:[],publishApproved:false,published:0,status:'editorial_fallback_review_required',policyEvidence:null};
+  return {...p,digest:planDigest(p)};
+ }
+ return {jstDate,status:'research_required',reason:'fallback_recent_copy_exhausted',slots:[],published:0};
+}
 
 function compose(candidate, research, date){
  const guide=THEMES[candidate.theme];
@@ -104,9 +124,22 @@ export function planThreadsDailyCycle({jstDate,ranking, researchByItemCode={},pe
 
 // This gate is deliberately separate from the actual publisher. A matching owner
 // approval record is required for the immutable text of the whole batch.
-export function selectDailyStage({plan,approval,autoPolicy,accountUsername,jstDate,slot,journal=[],officialPostCount}={}){
+export function selectDailyStage({plan,approval,autoPolicy,allowEditorialFallback=false,accountUsername,jstDate,slot,journal=[],officialPostCount}={}){
  const hold=reason=>({status:'hold',reason,published:0});
  if(!dayValid(jstDate)||!Array.isArray(journal)||!Number.isSafeInteger(officialPostCount)||officialPostCount<0)return hold('missing_runtime_evidence');
+ if(plan?.status==='editorial_fallback_review_required'){
+  const expected=fallbackSlots(plan.theme),index=DAILY_SLOTS.indexOf(slot);
+  if(plan.jstDate!==jstDate||plan.itemCode!==null||plan.campaignId!==keyOf(jstDate,'editorial:'+plan.theme)||!expected||JSON.stringify(plan.slots)!==JSON.stringify(expected)||!Array.isArray(plan.replySuggestions)||plan.replySuggestions.length||plan.policyEvidence!==null||plan.digest!==planDigest(plan))return hold('invalid_fallback_plan');
+  const manual=approval?.approvedByOwner===true&&approval.digest===plan.digest&&approval.campaignId===plan.campaignId&&approval.jstDate===jstDate;
+  if(!manual&&!(allowEditorialFallback===true&&autoPolicy===DAILY_AUTO_POLICY&&accountUsername==='rakumitsu_select'))return hold('fallback_approval_required');
+  if(index<0)return hold('slot_invalid');
+  const today=journal.filter(x=>x?.jstDate===jstDate);
+  if(officialPostCount>=3||new Set(today.map(x=>x.slot)).size>=3)return hold('daily_cap_reached');
+  if(today.some(x=>x.slot===slot))return hold('slot_already_attempted');
+  if(latestSlots(today).some(x=>!verifiedPost(x)))return hold('previous_attempt_uncertain');
+  const next=expected[index];
+  return {status:'eligible_for_existing_publisher',text:next.text,affiliateUrl:null,meta:{campaignId:plan.campaignId,dailyStage:next.role,itemCode:null,role:'guide',affiliate:false,authorization:manual?'exact_batch_review':'owner-approved-editorial-fallback'},published:0};
+ }
  if(!plan||plan.jstDate!==jstDate||plan.status!=='batch_review_required'||!Array.isArray(plan.slots)||plan.slots.length!==3||!str(plan.itemCode)||plan.campaignId!==keyOf(jstDate,plan.itemCode))return hold('missing_or_stale_plan');
  if(plan.slots.some((x,i)=>!x||x.slot!==DAILY_SLOTS[i]||x.role!==roles[i]||validatePublicationText(x.text,{revenue:i===2,affiliateUrl:x.affiliateUrl})||(i<2&&(/https?:\/\/|【PR】/i.test(x.text)||x.affiliateUrl))||(i===2&&!validAffiliate(x.affiliateUrl))))return hold('invalid_stage_payload');
  if(!Array.isArray(plan.replySuggestions)||plan.replySuggestions.length>3||plan.replySuggestions.some(x=>!x)||plan.digest!==planDigest(plan))return hold('approval_missing_or_changed');
@@ -131,6 +164,27 @@ export function selectDailyStage({plan,approval,autoPolicy,accountUsername,jstDa
  return {status:'eligible_for_existing_publisher',text:next.text,affiliateUrl:next.affiliateUrl,meta:{campaignId:plan.campaignId,dailyStage:next.role,itemCode:plan.itemCode,role:next.role==='revenue'?'revenue':'guide',affiliate:next.role==='revenue',authorization:manual?'exact_batch_review':DAILY_AUTO_POLICY},published:0};
 }
 
+// A new independently researched evening plan never overwrites the morning
+// plan. PR is allowed only after both related generic guides were confirmed.
+export function selectEveningResearchStage({plan,evening,autoPolicy,allowEditorialFallback,accountUsername,jstDate,slot,journal=[],officialPostCount}={}){
+ const hold=reason=>({status:'hold',reason,published:0});
+ if(slot!=='19:30'||plan?.status!=='editorial_fallback_review_required'||!evening||evening.fallbackDigest!==plan.digest||evening.plan?.theme!==plan.theme)return hold('evening_plan_missing_or_mismatch');
+ const base=selectDailyStage({plan,autoPolicy,allowEditorialFallback,accountUsername,jstDate,slot,journal,officialPostCount});
+ if(base.status!=='eligible_for_existing_publisher')return base;
+ const previous=latestSlots(journal.filter(r=>r.jstDate===jstDate));
+ for(const s of plan.slots.slice(0,2)){
+  const last=previous.find(r=>r.slot===s.slot);
+  if(!verifiedPost(last)||last.meta?.campaignId!==plan.campaignId||last.meta?.dailyStage!==s.role||last.text!==s.text)return hold('previous_editorial_stage_not_verified');
+ }
+ const product=evening.plan;
+ // Validate the complete immutable product plan under the normal auto gate.
+ // This is a planning-only check, not a claimed publication of its morning slot.
+ const checked=selectDailyStage({plan:product,autoPolicy,accountUsername,jstDate,slot:'07:30',journal:[],officialPostCount});
+ if(checked.status!=='eligible_for_existing_publisher'||product.status!=='batch_review_required')return hold('evening_product_quality_hold');
+ const next=product.slots[2];
+ return {status:'eligible_for_existing_publisher',text:next.text,affiliateUrl:next.affiliateUrl,meta:{campaignId:plan.campaignId,dailyStage:'revenue',itemCode:product.itemCode,role:'revenue',affiliate:true,authorization:'owner-approved-editorial-fallback',eveningProductDigest:product.digest},published:0};
+}
+
 // Only exact, separately selected reply drafts from the same approved batch.
 // A current scan must still contain the identical source text and draft.
 export function selectApprovedDailyReplies({plan,approval,jstDate,journal=[],candidates=[],replyHistory=[],ownUsername=''}={}){
@@ -146,9 +200,11 @@ export function selectApprovedDailyReplies({plan,approval,jstDate,journal=[],can
   .map(d=>candidates.find(c=>c.url===d.url&&c.author===d.author&&sha(c.text)===d.sourceDigest)).filter(Boolean);
 }
 
-export function summarizeDailyCycleOutcome({plan,jstDate,journal=[],insights=[]}={}){
+export function summarizeDailyCycleOutcome({plan,evening,jstDate,journal=[],insights=[]}={}){
  if(plan?.jstDate!==jstDate||!Array.isArray(plan.slots)||plan.slots.length!==3)return {status:'no_qualified_plan',confirmed:0};
- const stages=plan.slots.map(s=>{
+ const stages=plan.slots.map(original=>{
+  const rowCandidate=journal.filter(r=>r.jstDate===jstDate&&r.slot===original.slot).at(-1);
+  const s=original.slot==='19:30'&&evening?.fallbackDigest===plan.digest&&evening.plan?.slots?.[2]&&evening.plan?.digest===rowCandidate?.meta?.eveningProductDigest&&rowCandidate?.meta?.dailyStage==='revenue'?evening.plan.slots[2]:original;
   const attempts=journal.filter(r=>r.jstDate===jstDate&&r.slot===s.slot);
   const row=attempts.at(-1);
   const confirmed=verifiedPost(row)&&row.meta?.campaignId===plan.campaignId&&row.meta?.dailyStage===s.role&&row.text===s.text;
