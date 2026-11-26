@@ -36,3 +36,7 @@ test('three unqualified products trigger a different official genre without weak
 test('alternate genre rate limit stops further research',async()=>{
  const calls=[];const p=await prepareDailyThreadsCycle({...input,discover:async o=>{calls.push(o.genreId);if(o.genreId===456)throw Error('rakuten_ranking_http_429');return {editorialShortlist:{selected:[item]},results:{genre:{children:[{genreId:123,name:'インテリア・寝具・収納'},{genreId:456,name:'キッチン用品'}]}}};},fetchPage:async()=>({url:page,html:'<html>仕様不明</html>'})});assert.equal(p.reason,'rakuten_rate_limited');assert.deepEqual(calls,[undefined,123,456]);assert.equal(p.researchAttemptCount,1);
 });
+test('stock is re-researched with current official name and literal evidence, not published from cached metadata',async()=>{
+ let fetched=0;const stock={...item};const p=await prepareDailyThreadsCycle({...input,preferredCandidates:[stock],discover:async()=>{throw Error('temporary_discovery_failure')},fetchEvidence:async()=>{fetched++;return {...await input.fetchEvidence(),facts:[{id:'rakuten_item_name',claim:'楽天商品検索API掲載の商品名：収納チェスト ラック'}]};}});assert.equal(fetched,1);assert.equal(p.status,'batch_review_required');assert.equal(p.stockCandidate.itemCode,item.itemCode);
+ const rejected=await prepareDailyThreadsCycle({...input,preferredCandidates:[stock],fetchPage:async()=>({url:page,html:'<html>仕様不明</html>'})});assert.equal(rejected.status,'research_required');
+});
