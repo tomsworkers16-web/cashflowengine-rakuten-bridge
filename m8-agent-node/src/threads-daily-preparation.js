@@ -3,19 +3,19 @@ import { runDiscoveryProbe } from './probe-rakuten-discovery.js';
 import { fetchRakutenEditorialEvidence, canonicalRakutenItemUrl, assembleEditorialResearch, apiSource } from './editorial-rakuten-evidence.js';
 import { fetchRakutenProductPageHtml, verifyProductPageQuotes } from './editorial-page-verifier.js';
 import { extractEditorialSpecQuotes } from './editorial-spec-extractor.js';
-import { buildEditorialShortlist } from './editorial-shortlist.js';
+import { buildEditorialShortlist, evaluateRankingCandidate } from './editorial-shortlist.js';
 import { planThreadsDailyCycle } from './threads-daily-cycle.js';
 
 const limited=reason=>({status:'research_required',reason,mode:'review_only',slots:[],published:0,publishApproved:false});
 const rateLimited=e=>/\b(?:rakuten_[a-z_]+_http_429|HTTP_429|product_page_http_429)\b/i.test(String(e?.message||''));
-export async function prepareDailyThreadsCycle({jstDate,applicationId,accessKey,affiliateId,performanceRecords,history=[],replyCandidates=[],replyHistory=[],ownUsername='',fetchFn=fetch,delayFn=ms=>new Promise(r=>setTimeout(r,ms)),maxDetail=6,
+export async function prepareDailyThreadsCycle({jstDate,applicationId,accessKey,affiliateId,performanceRecords,history=[],replyCandidates=[],replyHistory=[],ownUsername='',preferredCandidates=[],desiredTheme=null,excludedItemCodes=[],fetchFn=fetch,delayFn=ms=>new Promise(r=>setTimeout(r,ms)),maxDetail=6,
  discover=runDiscoveryProbe,fetchEvidence=fetchRakutenEditorialEvidence,fetchPage=fetchRakutenProductPageHtml}={}){
  if(!Number.isInteger(maxDetail)||maxDetail<1||maxDetail>6)throw new TypeError('invalid_research_limit');
  if(!applicationId||!accessKey||!affiliateId)return limited('rakuten_credentials_missing');
  const boundedFetch=(url,options={})=>fetchFn(url,{...options,signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(12000)]):AbortSignal.timeout(12000)});
  let discovered;
  try{discovered=await discover({applicationId,accessKey,affiliateId,fetchFn:boundedFetch,enrich:false});}
- catch(e){return limited(rateLimited(e)?'rakuten_rate_limited':'discovery_failed');}
+ catch(e){if(rateLimited(e)||!preferredCandidates.length)return limited(rateLimited(e)?'rakuten_rate_limited':'discovery_failed');discovered={};}
  // Prefer official lifestyle categories. If the first category has no usable
  // evidence, try a second category, not lower the fact gate. Bounded to six
  // item details and at most two scoped discovery calls.
@@ -31,6 +31,8 @@ export async function prepareDailyThreadsCycle({jstDate,applicationId,accessKey,
  const rank=d=>(d.editorialShortlist?.selected??[]).filter(c=>!c.theme||['storage','cleaning','kitchen_textiles','food_preservation','digital','cooking'].includes(c.theme)).map(c=>({...c,hasAffiliateUrl:true}));
  const researchByItemCode={}, held=[];
  const used=new Set(history.filter(r=>{const age=Date.parse(jstDate+'T00:00:00Z')-Date.parse(r?.jstDate+'T00:00:00Z');return Number.isFinite(age)&&age>=0&&age<=7*86400000;}).map(r=>r.meta?.itemCode).filter(Boolean));
+ for(const code of excludedItemCodes)used.add(code);
+ const preferred=preferredCandidates.slice(0,12).map(c=>evaluateRankingCandidate({...c,hasAffiliateUrl:true})).filter(Boolean).map(c=>({...c,hasAffiliateUrl:true}));
  let attempted=0;const seen=new Set();
  for(let batch=0;batch<2;batch++){
  if(batch===1){
@@ -38,8 +40,8 @@ export async function prepareDailyThreadsCycle({jstDate,applicationId,accessKey,
   discovered=general;
   if(genres.length>1){const alternate=genres[(chosenIndex+1)%genres.length];try{await delayFn(1100);const scoped=await discover({applicationId,accessKey,affiliateId,genreId:Number(alternate.genreId),fetchFn:boundedFetch,enrich:false});if(scoped.editorialShortlist?.selected?.length)discovered=scoped;}catch(e){if(rateLimited(e))return {...limited('rakuten_rate_limited'),researchAttemptCount:attempted,researchHeld:held};}}
  }
- const ranking=rank(discovered).filter(c=>!used.has(c.itemCode)&&!seen.has(c.itemCode));
- const order=buildEditorialShortlist(ranking,{max:Math.min(5,Math.max(1,ranking.length)),performanceRecords}).selected;
+ const ranking=[...new Map([...(batch===0?preferred:[]),...rank(discovered)].map(c=>[c.itemCode,c])).values()].filter(c=>!used.has(c.itemCode)&&!seen.has(c.itemCode)&&(!desiredTheme||evaluateRankingCandidate(c)?.theme===desiredTheme));
+ const order=buildEditorialShortlist(ranking,{max:Math.min(5,Math.max(1,ranking.length)),performanceRecords}).selected.sort((a,b)=>Number(preferred.some(c=>c.itemCode===b.itemCode))-Number(preferred.some(c=>c.itemCode===a.itemCode)));
  const batchStart=attempted;
  for(const c of order){
   if(attempted>=maxDetail||attempted-batchStart>=3)break;
@@ -65,9 +67,14 @@ export async function prepareDailyThreadsCycle({jstDate,applicationId,accessKey,
      assembled={research:{itemCode:c.itemCode,affiliateUrl:api.affiliateUrl,rights:{noMedia:true},facts:captionPlans.map(s=>({id:s.id,claim:'楽天の商品説明：'+s.quote+'と記載',sourceUrl:apiSource,sourceKind:'official_item_caption',checkedAt:jstDate,evidenceQuote:s.quote}))}};
    }
    if(!assembled.research){held.push({itemCode:c.itemCode,reason:'research_packet_incomplete'});continue;}
+   const nameFact=api.facts?.find(f=>f.id==='rakuten_item_name')?.claim;
+   const stock=preferred.some(x=>x.itemCode===c.itemCode);
+   if(stock&&(!nameFact||!nameFact.startsWith('楽天商品検索API掲載の商品名：'))){held.push({itemCode:c.itemCode,reason:'stock_current_name_missing'});continue;}
+   const freshCandidate={...c,hasAffiliateUrl:true,itemName:nameFact?.startsWith('楽天商品検索API掲載の商品名：')?nameFact.slice('楽天商品検索API掲載の商品名：'.length):c.itemName};
+   if(desiredTheme&&evaluateRankingCandidate(freshCandidate)?.theme!==desiredTheme){held.push({itemCode:c.itemCode,reason:'theme_changed'});continue;}
    researchByItemCode[c.itemCode]={...assembled.research,productPageUrl:page};
-   const plan=planThreadsDailyCycle({jstDate,ranking,performanceRecords,researchByItemCode,history,replyCandidates,replyHistory,ownUsername});
-   if(plan.status==='batch_review_required')return {...plan,researchAttemptCount:attempted,researchHeld:held};
+   const plan=planThreadsDailyCycle({jstDate,ranking:[freshCandidate],performanceRecords,researchByItemCode,history,replyCandidates,replyHistory,ownUsername});
+   if(plan.status==='batch_review_required')return {...plan,stockCandidate:{itemCode:freshCandidate.itemCode,itemName:freshCandidate.itemName,price:freshCandidate.price,rank:freshCandidate.rank,hasAffiliateUrl:true},researchAttemptCount:attempted,researchHeld:held};
    held.push({itemCode:c.itemCode,reason:plan.held?.find(x=>x.itemCode===c.itemCode)?.reason||'editorial_plan_held'});
   }catch(e){
    if(rateLimited(e))return {...limited('rakuten_rate_limited'),researchAttemptCount:attempted,researchHeld:held};
