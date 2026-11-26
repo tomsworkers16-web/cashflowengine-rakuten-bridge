@@ -12,9 +12,10 @@ import { summarizeRevenueCopyVariants } from './revenue-copy-experiment.js';
 import { selectPostsForInsights } from './post-insights-selection.js';
 import { summarizeRecentAffiliateEvidence } from './rolling-revenue-evidence.js';
 import { prepareDailyThreadsCycle } from './threads-daily-preparation.js';
-import { summarizeDailyCycleOutcome } from './threads-daily-cycle.js';
-import { dailyCycleEnabled } from './threads-daily-policy.js';
+import { summarizeDailyCycleOutcome, planEditorialFallback } from './threads-daily-cycle.js';
+import { dailyCycleEnabled, editorialFallbackEnabled } from './threads-daily-policy.js';
 import { rakutenCooldownRemaining } from './rakuten-rate-policy.js';
+import {readProductStock,readLocalEditorialJson,writeLocalEditorialJson} from './editorial-resilience.js';
 
 const root = path.resolve(process.cwd());
 const dataDir = path.resolve(process.env.CFE_DATA_DIR || path.join(root, '.data'));
@@ -214,7 +215,8 @@ async function buildNightReport(day = dayKey()) {
 
   report.revenueDecisions = decideRevenueActions(report);
   if(dailyCycleEnabled(dataDir)){
-    report.dailyCycle=summarizeDailyCycleOutcome({plan:readJson(path.join(dataDir,'threads-daily-proposal.json'),null),jstDate:day,journal:postJournal,insights:postInsights});
+    report.dailyCycle=summarizeDailyCycleOutcome({plan:readJson(path.join(dataDir,'threads-daily-proposal.json'),null),evening:readLocalEditorialJson(dataDir,'editorial-evening-plan.json'),jstDate:day,journal:postJournal,insights:postInsights});
+    report.editorialAlert=readLocalEditorialJson(dataDir,'editorial-alert.json');
   }
   report.firstCommissionFunnel = diagnoseFirstCommission(report);
   // Rakuten day-level CSV can lag behind the posting date. Preserve past
@@ -264,19 +266,27 @@ function recentReports(limit = 3) {
 async function prepareDailyCycleProposal(current){
   const day=dayKey(),file=path.join(dataDir,'threads-daily-proposal.json');
   const present=readJson(file,null);
-  if(present?.jstDate===day)return {status:'existing_proposal_preserved',digest:present.digest??null};
-  if(rakutenCooldownRemaining(current.lastRakutenRateLimitAt)>0)return {status:'research_required',reason:'rakuten_rate_limit_cooldown'};
+  const history=readJsonl(postsFile),fallback=editorialFallbackEnabled(dataDir);
+  const replaceHeld=present?.jstDate===day&&present.status==='research_required'&&!present.digest&&fallback&&!history.some(p=>p.jstDate===day)&&readJson(path.join(dataDir,'threads-daily-approval.json'),null)?.jstDate!==day;
+  if(present?.jstDate===day&&!replaceHeld)return {status:'existing_proposal_preserved',digest:present.digest??null};
   const ledger=readJson(path.join(dataDir,'affiliate-results.json'),null);
   const snapshot=readJson(candidatesFile,null);
   const snapshotAge=Date.now()-Date.parse(snapshot?.scannedAt||'');
   let plan;
-  try{
+  if(replaceHeld)plan=present;
+  else if(rakutenCooldownRemaining(current.lastRakutenRateLimitAt)>0||rakutenCooldownRemaining(readLocalEditorialJson(dataDir,'editorial-research-cooldown.json')?.at)>0)plan={status:'research_required',reason:'rakuten_rate_limit_cooldown'};
+  else try{
     plan=await prepareDailyThreadsCycle({jstDate:day,applicationId:process.env.RAKUTEN_APPLICATION_ID,
       accessKey:process.env.RAKUTEN_ACCESS_KEY,affiliateId:process.env.RAKUTEN_AFFILIATE_ID,
-      performanceRecords:Array.isArray(ledger?.records)?ledger.records:undefined,history:readJsonl(postsFile),
+      performanceRecords:Array.isArray(ledger?.records)?ledger.records:undefined,history,preferredCandidates:fallback?readProductStock(dataDir,day).map(r=>r.candidate):[],
       replyCandidates:Number.isFinite(snapshotAge)&&snapshotAge>=0&&snapshotAge<=24*3600000&&Array.isArray(snapshot?.candidates)?snapshot.candidates:[],
       replyHistory:readJsonl(repliesFile),ownUsername:current.threadsUsername||''});
-  }catch{return {status:'research_required',reason:'proposal_preparation_failed'};}
+  }catch{plan={status:'research_required',reason:'proposal_preparation_failed'};}
+  if(plan.reason==='rakuten_rate_limited')writeLocalEditorialJson(dataDir,'editorial-research-cooldown.json',{at:new Date().toISOString()});
+  if(fallback&&plan.status==='research_required'){
+    const alternative=planEditorialFallback({jstDate:day,history,reason:plan.reason});
+    plan={...alternative,researchAttemptCount:plan.researchAttemptCount??0,researchHeld:plan.researchHeld??[]};
+  }
   plan={...plan,jstDate:day};
   // The approval is a separate owner-created document. Never overwrite it.
   // Publishing reads a complete immutable proposal, not a partially written file.
