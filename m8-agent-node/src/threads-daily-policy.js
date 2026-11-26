@@ -13,4 +13,8 @@ export function readOwnerDailyPolicy(dataDir){
  }catch{return null;}
 }
 export function dailyAutoEnabled(dataDir,env=process.env){return env.CFE_THREADS_DAILY_AUTO_PUBLISH===DAILY_AUTO_POLICY||readOwnerDailyPolicy(dataDir)===DAILY_AUTO_POLICY;}
+export function editorialFallbackEnabled(dataDir){
+ if(readOwnerDailyPolicy(dataDir)!==DAILY_AUTO_POLICY)return false;
+ try{return JSON.parse(fs.readFileSync(path.join(dataDir,POLICY_FILE),'utf8')).editorialFallback===true;}catch{return false;}
+}
 export function dailyCycleEnabled(dataDir,env=process.env){return String(env.CFE_THREADS_DAILY_CYCLE_ENABLED||'false').toLowerCase()==='true'||dailyAutoEnabled(dataDir,env)||fs.existsSync(path.join(dataDir,POLICY_FILE));}
