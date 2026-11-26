@@ -19,6 +19,10 @@ const THEMES={
  digital:{title:'スマホ周辺機器を買う前に',column:'充電や配線を便利にしたいときは、まず手持ちの機器とケーブルを確認。端子が合っていても、必要な給電条件や取り回しが違えば思ったように使えない場合があります。新しい道具は、今の不便がどこにあるか整理してから選びたいですね。',checks:['端子・対応機種を公式説明で照合する。','必要な電源条件と手持ち機器を比較する。','設置場所とケーブルの取り回しを測る。'],words:/スマホ|充電|ケーブル|配線|デスク/u},
  cooking:{title:'調理道具を選ぶ前に',column:'便利な調理道具も、準備と片付けが大変だと出番が減ってしまいます。普段の調理でどの工程に手間がかかるか思い返して、既存の道具で代用できないか確認してみたいですね。',checks:['普段の材料量と道具の容量・寸法を照合する。','洗い方・取り外せる部品を商品説明で確認する。','使う頻度と収納場所を考える。'],words:/調理|料理|キッチン|献立|洗い物/u}
 };
+const ALTERNATE_GUIDES={
+ storage:{title:'収納は戻す場所から決める',column:'片付けたい物を一つ選んで、使う場所からしまう場所まで実際に歩いてみます。両手がふさがっていても戻せるか、手前の物をどかす必要がないか。出し入れの動きに無理があれば、収納を増やす前に置き場所を変える手もあります。'},
+ cooking:{title:'調理道具は洗う手順から選ぶ',column:'新しい調理道具を選ぶ前に、普段の洗い物を一度思い返してみてください。油が残る場所に手やスポンジが届くか、外した部品を乾かす場所はあるか。調理中の便利さと一緒に、使い終わった後の手順まで考えると、家で使い続けられるか判断しやすくなります。'}
+};
 const str=x=>typeof x==='string'?x.trim():'';
 const dayValid=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x+'T00:00:00Z'))&&new Date(x+'T00:00:00Z').toISOString().slice(0,10)===x;
 const dayTime=x=>Date.parse(x+'T00:00:00Z');
@@ -51,8 +55,8 @@ export function planEditorialFallback({jstDate,history=[],reason='no_qualified_p
  return {jstDate,status:'research_required',reason:'fallback_recent_copy_exhausted',slots:[],published:0};
 }
 
-function compose(candidate, research, date){
- const guide=THEMES[candidate.theme];
+function compose(candidate, research, date, guideVariant){
+ const guide=guideVariant===undefined?THEMES[candidate.theme]:guideVariant==='cleanup'?ALTERNATE_GUIDES[candidate.theme]:null;
  if(!guide)return {reason:'theme_guide_missing'};
  if(!research||research.itemCode!==candidate.itemCode||!validPage(research.productPageUrl)||!validAffiliate(research.affiliateUrl)||!sameTarget(research.affiliateUrl,research.productPageUrl))return {reason:'product_or_link_identity_unverified'};
  const facts=(Array.isArray(research.facts)?research.facts:[]).filter(f=>freshFact(f,research.productPageUrl,date));
@@ -110,12 +114,18 @@ export function planThreadsDailyCycle({jstDate,ranking, researchByItemCode={},pe
  const shortlist=buildEditorialShortlist(ranking.filter(x=>!used.has(x?.itemCode)),{max,performanceRecords});
  const held=[];
  for(const candidate of shortlist.selected){
-  const attempt=compose(candidate,researchByItemCode[candidate.itemCode],jstDate);
-  if(!attempt.slots){held.push({itemCode:candidate.itemCode,reason:attempt.reason});continue;}
-  if(attempt.slots.slice(0,2).some(s=>recentGuide.has(s.text))){held.push({itemCode:candidate.itemCode,reason:'recent_editorial_copy'});continue;}
   const research=researchByItemCode[candidate.itemCode];
+  const repeats=attempt=>attempt.slots?.slice(0,2).some(s=>recentGuide.has(s.text));
+  let guideVariant;
+  let attempt=compose(candidate,research,jstDate);
+  if(repeats(attempt)&&Object.hasOwn(ALTERNATE_GUIDES,candidate.theme)){
+   const alternate=compose(candidate,research,jstDate,'cleanup');
+   if(alternate.slots&&!repeats(alternate)){attempt=alternate;guideVariant='cleanup';}
+  }
+  if(!attempt.slots){held.push({itemCode:candidate.itemCode,reason:attempt.reason});continue;}
+  if(repeats(attempt)){held.push({itemCode:candidate.itemCode,reason:'recent_editorial_copy'});continue;}
   const plan={version:'threads-daily-cycle-v1',mode:'review_only',jstDate,campaignId:keyOf(jstDate,candidate.itemCode),itemCode:candidate.itemCode,theme:candidate.theme,slots:attempt.slots,gateScore:attempt.gateScore,publishApproved:false,published:0,
-   policyEvidence:{candidate:{itemCode:candidate.itemCode,itemName:candidate.itemName,theme:candidate.theme},research:{itemCode:research.itemCode,productPageUrl:research.productPageUrl,affiliateUrl:research.affiliateUrl,rights:research.rights,facts:research.facts}},
+   policyEvidence:{...(guideVariant?{guideVariant}:{}),candidate:{itemCode:candidate.itemCode,itemName:candidate.itemName,theme:candidate.theme},research:{itemCode:research.itemCode,productPageUrl:research.productPageUrl,affiliateUrl:research.affiliateUrl,rights:research.rights,facts:research.facts}},
    replySuggestions:planDailyReplySuggestions({candidates:replyCandidates,history:replyHistory,ownUsername,theme:candidate.theme,date:jstDate})};
   return {...plan,digest:planDigest(plan),status:'batch_review_required',held,performance:shortlist.performance??null};
  }
@@ -148,7 +158,7 @@ export function selectDailyStage({plan,approval,autoPolicy,allowEditorialFallbac
   if(autoPolicy!==DAILY_AUTO_POLICY||accountUsername!=='rakumitsu_select')return hold('approval_missing_or_changed');
   const evidence=plan.policyEvidence,c=evidence?.candidate,r=evidence?.research;
   if(!c||!r||c.itemCode!==plan.itemCode||c.theme!==plan.theme||r.itemCode!==plan.itemCode||!Array.isArray(r.facts)||r.facts.length<2||r.facts.length>12||new Set(r.facts.map(f=>f.id)).size!==r.facts.length||r.facts.some(f=>!freshFact(f,r.productPageUrl,jstDate)||f.checkedAt!==jstDate||!str(f.evidenceQuote)||f.evidenceQuote.length>300)||!validPage(r.productPageUrl)||new URL(r.productPageUrl).pathname.split('/')[1]!==plan.itemCode.split(':')[0])return hold('auto_policy_evidence_required');
-  const regenerated=compose(c,r,jstDate);
+  const regenerated=compose(c,r,jstDate,evidence.guideVariant);
   if(regenerated.gateScore!==12||JSON.stringify(regenerated.slots)!==JSON.stringify(plan.slots))return hold('auto_policy_quality_hold');
  }
  const index=DAILY_SLOTS.indexOf(slot);if(index<0)return hold('slot_invalid');

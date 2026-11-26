@@ -30,10 +30,12 @@ function variantSection(text,label,nextLabels) {
 function generalSpecs(text) {
   const starts=[...text.matchAll(/(?:商品仕様|商品詳細|商品情報|商品説明)\s*[:：]?/gu)];
   const regions=starts.map(m=>text.slice(m.index+m[0].length,m.index+m[0].length+1800).split(/関連商品|おすすめ商品|こちらもおすすめ|商品レビュー|他の商品|ショップレビュー/u)[0]);
+  // Unscoped facts cannot establish which variant a labelled value belongs to.
+  if(regions.some(region=>/(?:[A-Z]{1,3}|小|中|大|通常|ワイド|スリム)サイズ\s*[:：]|[1-9]\d*\s*サイズ(?:展開|から選)/u.test(region)))return [];
   const rules=[
-    ['material',/(?:材質|素材)\s*[:：]?\s*((?:ポリプロピレン|ポリエチレン|ポリエステル|ステンレス(?:鋼)?|シリコーン(?:ゴム)?|シリコン(?:ゴム)?|ABS樹脂|綿100[%％]|綿１００[%％]))(?=\s|[、。／/]|$)/gu],
-    ['dimensions',/(?:本体サイズ|商品サイズ|外寸|本体寸法)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:cm|mm)?\s*[×xX]\s*\d+(?:\.\d+)?\s*(?:cm|mm)?(?:\s*[×xX]\s*\d+(?:\.\d+)?)?\s*(?:cm|mm))/gu],
-    ['product_weight',/(?:本体重量|商品重量|本体質量)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:kg|g))\b/gu],
+    ['material',/(?:材質|素材)\s*[:：]?\s*((?:ポリプロピレン|ポリエチレン|ポリエステル|ステンレス(?:鋼)?|シリコーン(?:ゴム)?|シリコン(?:ゴム)?|ABS樹脂|(?:綿|コットン)\s*[1１][0０][0０]\s*[%％]))(?=\s|[、。／/]|$)/gu],
+    ['dimensions',/(?<![\p{L}\p{N}])(?:本体サイズ|商品サイズ|外寸|本体寸法|サイズ|寸法)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:cm|mm)?\s*[×xX]\s*\d+(?:\.\d+)?\s*(?:cm|mm)?(?:\s*[×xX]\s*\d+(?:\.\d+)?)?\s*(?:cm|mm))(?![A-Za-z]|\s*[×xX\d./～〜-])(?:\s*表記は洗濯後の寸法)?/gu],
+    ['product_weight',/(?<![\p{L}\p{N}])(?:本体重量|商品重量|本体質量|重量)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:kg|g))(?![A-Za-z]|\s*[～〜/~−-])/gu],
     ['capacity',/(?:満水容量|実容量|容量)\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*(?:mL|ml|L|リットル))\b/gu],
     ['heat_resistance',/耐熱温度\s*[:：]?\s*(約?\s*\d{1,3}\s*(?:℃|°C))/gu],
     ['load_capacity',/耐荷重\s*[:：]?\s*(約?\s*\d+(?:\.\d+)?\s*kg)\b/gu],
@@ -41,9 +43,10 @@ function generalSpecs(text) {
   ];
   const out=[];
   for(const [id,re] of rules){
-    const matches=regions.flatMap(region=>[...region.matchAll(re)]).filter(m=>clean(m[0]).normalize('NFKC').replace(/\s+/gu,'').length>=8&&clean(m[0]).length<=150);
-    const distinct=new Set(matches.map(m=>clean(m[0]).normalize('NFKC').replace(/\s+/gu,'')));
-    if(distinct.size===1){const quote=clean(matches[0][0]);out.push({id,quote,claim:quote+'と記載'});}
+    const matches=regions.flatMap(region=>[...region.matchAll(re)]);
+    const distinct=new Set(matches.map(m=>clean(m[1]).normalize('NFKC').replace(/\s+/gu,'')));
+    const quote=matches.map(m=>clean(m[0])).find(value=>value.normalize('NFKC').replace(/\s+/gu,'').length>=8&&value.length<=150);
+    if(distinct.size===1&&quote)out.push({id,quote,claim:quote+'と記載'});
   }
   return out;
 }
